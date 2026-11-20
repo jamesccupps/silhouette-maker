@@ -69,6 +69,65 @@ def _arm_idle() -> None:
     _idle.start()
 
 
+@lru_cache(maxsize=1)
+def runtime() -> str:
+    """How the cut-out models run here: "nvidia" (NVIDIA's own runtime, CUDA:
+    about ten times faster than DirectML for the best model), "directml" (any
+    DirectX 12 graphics card on Windows) or "cpu"."""
+    try:
+        import onnxruntime as ort
+
+        have = ort.get_available_providers()
+    except Exception:
+        return "cpu"
+    if "CUDAExecutionProvider" in have and _cuda_loads(ort):
+        return "nvidia"
+    return "directml" if "DmlExecutionProvider" in have else "cpu"
+
+
+def _cuda_loads(ort) -> bool:
+    """True when the CUDA part of onnxruntime and the NVIDIA libraries it needs
+    (installed as Python packages by setup) really load on this computer."""
+    import ctypes
+
+    try:
+        if hasattr(ort, "preload_dlls"):
+            ort.preload_dlls()
+        capi = Path(ort.__file__).parent / "capi"
+        name = "onnxruntime_providers_cuda.dll" if sys.platform == "win32" else "libonnxruntime_providers_cuda.so"
+        ctypes.CDLL(str(capi / name))
+        return True
+    except Exception:
+        return False
+
+
+def cuda_works() -> bool:
+    """Run a tiny model on the NVIDIA runtime for real. Setup uses this to
+    decide between NVIDIA's runtime and DirectML (an old driver can load the
+    libraries and still be unable to run anything)."""
+    def pb(field: int, payload) -> bytes:  # one protobuf field: a number or a nested message/string
+        if isinstance(payload, int):
+            return bytes([field << 3, payload])
+        payload = payload.encode() if isinstance(payload, str) else payload
+        return bytes([field << 3 | 2, len(payload)]) + payload
+
+    def value(name: str) -> bytes:  # a float tensor of one number
+        return pb(1, name) + pb(2, pb(1, pb(1, 1) + pb(2, pb(1, pb(1, 1)))))
+
+    graph = pb(1, pb(1, "x") + pb(2, "y") + pb(4, "Identity")) + pb(2, "g") + pb(11, value("x")) + pb(12, value("y"))
+    model = pb(1, 8) + pb(8, pb(2, 13)) + pb(7, graph)
+    try:
+        import onnxruntime as ort
+
+        if runtime() != "nvidia":
+            return False
+        s = ort.InferenceSession(model, providers=["CUDAExecutionProvider"])
+        out = s.run(None, {"x": np.array([3.0], dtype=np.float32)})
+        return s.get_providers()[0] == "CUDAExecutionProvider" and float(out[0][0]) == 3.0
+    except Exception:
+        return False
+
+
 def load_photo(fp) -> Image.Image:
     """Open a photo upright, in RGB, shrunk to the working size."""
     img = Image.open(fp)
@@ -80,12 +139,14 @@ def load_photo(fp) -> Image.Image:
 def segment(img: Image.Image, quality: str = "best") -> tuple[np.ndarray, str]:
     """Return (0/255 mask of the person, name of the model that made it).
     Runs the local model; "best" falls back to the fast one if it cannot run."""
+    rt = runtime()  # before rembg, so NVIDIA's libraries are loaded first
     from rembg import new_session, remove
 
-    # The big model needs the graphics card (DirectML); on the CPU it runs out
-    # of memory. If it cannot run at all, the small model takes over.
-    tries = [("birefnet-portrait", ["DmlExecutionProvider", "CPUExecutionProvider"])] if quality != "fast" else []
-    tries.append((MODELS["fast"], ["CPUExecutionProvider"]))
+    # The big model needs the graphics card; on the CPU it runs out of memory.
+    # If it cannot run at all, the small model takes over.
+    gpu = {"nvidia": ["CUDAExecutionProvider"], "directml": ["DmlExecutionProvider"]}.get(rt, [])
+    tries = [(MODELS["best"], gpu + ["CPUExecutionProvider"])] if quality != "fast" else []
+    tries.append((MODELS["fast"], (gpu if rt == "nvidia" else []) + ["CPUExecutionProvider"]))
     with _lock:
         for i, (name, providers) in enumerate(tries):
             try:
@@ -462,9 +523,10 @@ def text_width_em(text: str, key: str) -> float:
     return w / upm
 
 
-def text_d(text: str, key: str, size: float, cx: float, baseline: float) -> str:
+def text_d(text: str, key: str, size: float, cx: float, baseline: float, pen=None):
     """Path data for text as outlines: letters `size` tall (the em), centred on
-    cx, sitting on `baseline`, all in the output's units."""
+    cx, sitting on `baseline`, all in the output's units. With a pen of your
+    own (see RingPen) the letters are drawn into it instead."""
     from fontTools.pens.svgPathPen import SVGPathPen
     from fontTools.pens.transformPen import TransformPen
 
@@ -472,13 +534,54 @@ def text_d(text: str, key: str, size: float, cx: float, baseline: float) -> str:
     run, w, upm = _run(text, key)
     k = size / upm
     x0 = cx - w * k / 2
-    pen = SVGPathPen(glyphs, ntos=lambda v: f"{v:.2f}")
+    own = pen is None
+    if own:
+        pen = SVGPathPen(glyphs, ntos=lambda v: f"{v:.2f}")
     for g, x in run:
         glyphs[g].draw(TransformPen(pen, (k, 0, 0, -k, x0 + x * k, baseline)))
-    return pen.getCommands()
+        if not own:
+            pen.next_glyph()
+    return pen.getCommands() if own else pen
 
 
-def arc_d(segments: list[tuple[str, str, float]], cx: float, cy: float, radius: float) -> str:
+def ring_pen():
+    """A pen that collects letters as plain point rings, one list per letter:
+    pen.glyphs = [[ring, ring, ...], ...]. The 3D files are built from these."""
+    from fontTools.pens.basePen import BasePen
+
+    class RingPen(BasePen):
+        def __init__(self):
+            super().__init__(None)
+            self.glyphs, self._ring = [[]], None
+
+        def next_glyph(self):
+            if self.glyphs[-1]:
+                self.glyphs.append([])
+
+        def _moveTo(self, pt):
+            self._ring = [pt]
+
+        def _lineTo(self, pt):
+            self._ring.append(pt)
+
+        def _curveToOne(self, p1, p2, p3):
+            p0 = self._ring[-1]
+            for t in (0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0):
+                a, b, c, d = (1 - t) ** 3, 3 * (1 - t) ** 2 * t, 3 * (1 - t) * t**2, t**3
+                self._ring.append((a * p0[0] + b * p1[0] + c * p2[0] + d * p3[0],
+                                   a * p0[1] + b * p1[1] + c * p2[1] + d * p3[1]))
+
+        def _closePath(self):
+            if self._ring and len(self._ring) >= 3:
+                self.glyphs[-1].append(self._ring)
+            self._ring = None
+
+        _endPath = _closePath
+
+    return RingPen()
+
+
+def arc_d(segments: list[tuple[str, str, float]], cx: float, cy: float, radius: float, pen=None):
     """Text as outlines along the bottom of a circle: centred at the bottom,
     reading left to right, tops of the letters towards the centre. segments is
     [(text, font key, letter size)], one after another, so the name and the
@@ -494,16 +597,21 @@ def arc_d(segments: list[tuple[str, str, float]], cx: float, cy: float, radius: 
     out, start = [], 0.0
     for run, font, k, width in runs:
         glyphs, hmtx = font.getGlyphSet(), font["hmtx"]
-        pen = SVGPathPen(glyphs, ntos=lambda v: f"{v:.2f}")
+        own = pen is None or isinstance(pen, SVGPathPen)
+        if own:
+            pen = SVGPathPen(glyphs, ntos=lambda v: f"{v:.2f}")
         for g, x in run:
             adv = hmtx[g][0] * k
             th = (start + x * k + adv / 2 - total / 2) / radius  # angle of this letter's middle, 0 = bottom
             c, sn = np.cos(th), np.sin(th)
             px, py = cx + radius * sn, cy + radius * c
             glyphs[g].draw(TransformPen(pen, (k * c, -k * sn, -k * sn, -k * c, px - adv / 2 * c, py + adv / 2 * sn)))
-        out.append(pen.getCommands())
+            if not own:
+                pen.next_glyph()
+        if own:
+            out.append(pen.getCommands())
         start += width
-    return "".join(out)
+    return "".join(out) if own else pen
 
 
 def text_arc_d(text: str, key: str, size: float, cx: float, cy: float, radius: float) -> str:
@@ -797,6 +905,64 @@ def svg_sheets(items: list[tuple[str, dict, dict]], sheet_w=11.5, sheet_h=11.5,
     return sheets
 
 
+PAPERS = {"letter": (8.5, 11.0, "Letter (8.5 \u00d7 11 in)"), "a4": (8.2677, 11.6929, "A4 (210 \u00d7 297 mm)")}
+
+
+def print_pages(items: list[tuple[str, dict, dict]], opts=None, paper: str = "letter", show: str = "ornament",
+                ink: str = "solid", names: bool = True, copies: int = 1, margin: float = 0.5,
+                gap: float = 0.2) -> list[str]:
+    """Pages to print on paper at real size, one SVG per page.
+
+    show: ornament (each child on a dashed outline of the ornament) | shape
+        (just the silhouette and its lettering)
+    ink: solid (filled black) | outline (a thin line: saves ink, good for
+        cutting out by hand or tracing)
+    names: a small caption under each (name and height)
+    Every page carries a bar exactly 2 inches long, to check the print scale."""
+    pw, ph, _ = PAPERS.get(paper, PAPERS["letter"])
+    u, o = UNITS_PER_INCH, _opts(opts)
+    # "fill" lands inside fill="..." in the piece, so an outline closes that and adds a stroke
+    fill = "#000000" if ink != "outline" else 'none" stroke="#000000" stroke-width="0.7'
+    dashed = 'fill="none" stroke="#888888" stroke-width="0.75" stroke-dasharray="4 3"'
+    cap = 0.2 if names else 0.0
+    blocks = []
+    for name, result, settings in items:
+        if show == "shape":
+            lay = _layout(result, settings, dict(o, border="none", space=0.0), name)
+            w, h, fits = lay["w"], lay["h"], True
+            body = _piece(name, result, settings, lay, 0.0, 0.0, border=False, fill=fill, text_fill=fill)
+        else:
+            on = on_ornament(name, result, settings, o, fill=fill, orn_attrs=dashed)
+            w, h, fits, body = on["w"], on["h"], on["fits"], on["body"]
+        note = f"{_xml(name) or 'Unnamed'} \u00b7 {size_in(result, settings)[1]:.2f} in tall" + ("" if fits else " \u00b7 does not fit")
+        blocks.extend([(w, h, body, note)] * max(1, int(copies)))
+
+    head = 0.35  # the scale bar and its note
+    top = margin + head
+    pages, body, x, y, row_h = [], [], margin, top, 0.0
+
+    def close():
+        bar = (f'<rect x="{margin * u:.2f}" y="{margin * u:.2f}" width="{2 * u:.2f}" height="{0.08 * u:.2f}" fill="#000000"/>'
+               f'<text x="{(margin + 2.15) * u:.2f}" y="{(margin + 0.08) * u:.2f}" font-family="Segoe UI, Arial, sans-serif" '
+               f'font-size="8" fill="#444444">This bar is exactly 2 inches (50.8 mm) long when the page is printed at 100%.</text>\n')
+        pages.append(_svg(pw, ph, bar + "".join(body)))
+
+    for w, h, inner, note in blocks:
+        if x > margin and x + w > pw - margin:
+            x, y, row_h = margin, y + row_h + gap, 0.0
+        if y > top and y + h + cap > ph - margin:
+            close()
+            body, x, y, row_h = [], margin, top, 0.0
+        body.append(f'<g transform="translate({x * u:.2f} {y * u:.2f})">{inner}</g>\n')
+        if names:
+            body.append(f'<text x="{(x + w / 2) * u:.2f}" y="{(y + h + 0.15) * u:.2f}" text-anchor="middle" '
+                        f'font-family="Segoe UI, Arial, sans-serif" font-size="8" fill="#333333">{note}</text>\n')
+        x, row_h = x + w + gap, max(row_h, h + cap)
+    if body:
+        close()
+    return pages
+
+
 def png_cutout(result: dict, settings: dict, opts=None) -> Image.Image:
     """Black shape on transparent (plus the border, if any), dpi set to the
     finished size. Lettering is left out: it exists only as outlines in the SVG."""
@@ -895,7 +1061,8 @@ def _ram_gb() -> float:
 @lru_cache(maxsize=1)
 def hardware() -> dict:
     """{"gpu": name or None, "vram_gb", "ram_gb", "gpu_runtime": the cut-out
-    models can use the graphics card here}. Looked up once."""
+    models can use the graphics card here, "runtime": how (see runtime())}.
+    Looked up once."""
     gpus = []
     try:
         if sys.platform == "win32":
@@ -907,14 +1074,9 @@ def hardware() -> dict:
     except Exception:
         pass
     name, vram = max(gpus, key=lambda g: g[1], default=(None, 0.0))
-    try:
-        import onnxruntime
-
-        providers = onnxruntime.get_available_providers()
-    except Exception:
-        providers = []
+    rt = runtime()
     return {"gpu": name, "vram_gb": round(vram, 1), "ram_gb": round(_ram_gb(), 1),
-            "gpu_runtime": any(p in providers for p in ("DmlExecutionProvider", "CUDAExecutionProvider"))}
+            "gpu_runtime": rt != "cpu", "runtime": rt}
 
 
 def advice(hw: dict, best_ran: bool = False, best_failed: bool = False) -> dict:

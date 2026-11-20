@@ -40,7 +40,12 @@ ornament.
 - **Lettering**: the child's name and a second line such as the year, straight
   under the silhouette or curved along the edge. Long names wrap and shrink to
   stay on the ornament.
-- **Proof sheet**: print everyone at real size on plain paper before cutting.
+- **Print at real size**: a print preview shows the pages exactly as they will
+  come out, on the ornament or the silhouette alone, solid or as an outline, on
+  Letter or A4. Print it, or save it as a PDF.
+- **3D printing**: the whole ornament (with the silhouette and lettering
+  standing up from it, and a hole or loop for the ribbon) or the silhouette
+  alone, as STL files in millimetres.
 - **Privacy tools**: delete the original photos once you are done and keep only
   the silhouettes; back up and restore everything as one file.
 
@@ -57,10 +62,21 @@ to 3.13.
 Double-click **Add desktop shortcut.bat** once to get a Silhouette Maker icon on
 your Desktop.
 
-**Best** cut-out quality uses the graphics card (any DirectX 12 card; about
-15 seconds a photo on an RTX 3060). If it can't run on your PC, the app says so
-and uses **Fast**, which runs on any CPU in about a second and is rougher
-around hair.
+**Best** cut-out quality uses the graphics card. If it can't run on your PC,
+the app says so and uses **Fast**, which runs on any CPU in about a second and
+is rougher around hair.
+
+Setup picks how the graphics card is used:
+
+- **An NVIDIA card**: NVIDIA's own runtime, about 1 second a photo on an
+  RTX 3060. It is a one-time download of about 2.2 GB, so the first setup takes
+  a while. If it cannot run (an old graphics driver), setup switches to DirectML
+  by itself.
+- **Any other DirectX 12 card**: DirectML, about 11 seconds a photo on the same
+  RTX 3060.
+
+To change it later, close the app and run `setup.bat nvidia` or
+`setup.bat directml` in the app's folder.
 
 The app looks at the computer when it starts (graphics card, its memory, the
 PC's memory) and says under **Add photos…** which method suits it. When you add
@@ -71,7 +87,7 @@ method** on the left changes it back.
 
 While it is cutting out, the *Best* model uses about 10 GB of graphics memory.
 It is let go 90 seconds after the last cut-out, so the app is light the rest of
-the time; the next photo after a pause takes about 10 seconds longer.
+the time; the next photo after a pause takes a few seconds longer.
 
 ### Linux and macOS
 
@@ -84,7 +100,9 @@ python3 -m venv .venv
 ```
 
 There the *Best* model runs on the CPU and needs roughly 16 GB of free memory;
-otherwise the app falls back to *Fast*.
+otherwise the app falls back to *Fast*. With an NVIDIA card on Linux,
+`pip uninstall onnxruntime` and `pip install "onnxruntime-gpu[cuda,cudnn]"`
+should give the fast runtime (also not tested).
 
 ## Use
 
@@ -141,18 +159,52 @@ straight from a camera (IMG_2041…) come in without a name; type one in the
 The letters are written into the SVG as outlines, not as text, because Design
 Space ignores text in an uploaded SVG. They arrive as their own layer, so you
 can cut them, draw them with a pen, or delete them. Small cut letters are hard
-to weed, so try the proof sheet first.
+to weed, so print them on paper first.
 
 **Behind the silhouette** (under **Files**) adds a plain box or the ornament's
 own shape to the files as a separate layer: a size guide you can delete, or a
 backing you can cut.
 
-### Before you cut: the proof sheet
+### Printing on paper
 
-**Proof sheet** in the gallery opens a page with every silhouette at its real
-size, sitting on a dashed circle the size of your ornament, with names. Print it
-at 100% ("Actual size", not "Fit"); the black bar at the top should measure
-exactly 2 inches. Check likeness and fit on paper before using vinyl.
+**Print…** (in the gallery for everyone or the ticked children, and under
+**Files** for one child) opens a print preview: the pages exactly as they will
+come out. Choose the paper (Letter or A4), whether each child is shown on a
+dashed outline of the ornament or as the silhouette alone, solid black or just
+an outline (to cut out by hand, or to save ink), names underneath, and how many
+copies of each.
+
+Then press **Print…** and set the scale to **100%** ("Actual size", not "Fit to
+page"). Everything then comes out at the size you set in the app. Every page
+has a black bar that measures exactly 2 inches when the scale is right. To get
+a PDF, choose "Save as PDF" as the printer.
+
+Use it as a proof before cutting vinyl: check likeness and fit on plain paper.
+
+### 3D printing
+
+Open **3D printing** in the editor. The picture there is drawn from the real
+model, in your ornament and vinyl colours.
+
+- **Download the whole ornament (STL)**: the ornament's shape with the
+  silhouette and any lettering standing up from it. Set the ornament's
+  thickness and how far the silhouette is raised. For two colours on a
+  one-colour printer, add a filament change at the height where the silhouette
+  starts (the app tells you the number).
+- **Ornament in colour parts (zip)**: the same thing as separate pieces
+  (ornament, silhouette, lettering) for a printer that changes colours by
+  itself. Drag all the pieces into the slicer at once, load them as one object
+  with several parts, and give each its own filament.
+- **Silhouette alone (STL)**: just the silhouette as a flat piece, to glue onto
+  a wooden ornament in place of vinyl.
+- **For hanging**: a hole near the top, a loop standing on the top edge, or
+  nothing. Automatic uses a hole when it clears the silhouette and lettering,
+  otherwise a loop.
+
+The files are in millimetres at the sizes set in the app, and open in Bambu
+Studio, OrcaSlicer, PrusaSlicer or Cura. **3D files** in the gallery downloads
+them for everyone at once. Letters with strokes thinner than the printer's
+nozzle will not print, so use a bold font or bigger letters.
 
 ### When you are finished
 
@@ -185,7 +237,8 @@ On a sheet, each shape carries the child's name in the layers panel.
 .venv\Scripts\python -m pytest -q tests
 ```
 
-- `engine.py`: cut-out, cleanup, outline and SVG/PNG writing.
+- `engine.py`: cut-out, cleanup, outline, lettering, SVG/PNG and print pages.
+- `model3d.py`: the STL files for 3D printing.
 - `app.py`: the local server. `--port N` and `--data FOLDER` run a second copy
   for testing without touching real photos.
 - `static/`: the page. No build step.
@@ -199,6 +252,7 @@ Please never put a real child's photo in an issue, a pull request or a test.
 - [BiRefNet](https://github.com/ZhengPeng7/BiRefNet) (MIT), the *Best* model.
 - [U²-Net](https://github.com/xuebinqin/U-2-Net) (Apache 2.0), the *Fast* model.
 - [fontTools](https://github.com/fonttools/fonttools) (MIT) reads the letter shapes.
+- [Shapely](https://github.com/shapely/shapely) (BSD) builds the solid shapes for 3D printing.
 - [ONNX Runtime](https://onnxruntime.ai/), [OpenCV](https://opencv.org/),
   [scikit-image](https://scikit-image.org/), [Pillow](https://python-pillow.org/),
   [NumPy](https://numpy.org/) and [Flask](https://flask.palletsprojects.com/).

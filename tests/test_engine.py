@@ -295,3 +295,20 @@ def test_fonts_are_listed_by_name_and_old_choices_still_work():
     assert engine.resolve_font(fonts[-1]["key"]) == fonts[-1]["key"]
     for f in fonts[:: max(1, len(fonts) // 12)]:  # a spread of them can all letter a name
         assert len(engine.text_d("Ava 2026", f["key"], 20.0, 0.0, 0.0)) > 50
+
+
+def test_print_pages_pack_everyone_at_real_size():
+    mask = bust()
+    S = settings(mask)
+    res = engine.outline(mask, S)
+    items = [(f"Child {i}", res, S) for i in range(7)]
+    pages = engine.print_pages(items, {"orn": 3.0}, "letter")
+    assert len(pages) == 2 and all('width="8.5000in" height="11.0000in"' in p for p in pages)
+    assert sum(p.count("in tall") for p in pages) == 7
+    assert all(f'width="{2 * 72:.2f}" height=' in p for p in pages)  # every page has the 2 inch bar
+    for p in pages:  # nothing is placed outside the half-inch margin
+        for x, y in re.findall(r'translate\(([\d.]+) ([\d.]+)\)', p):
+            assert 36 <= float(x) <= (8.5 - 0.5 - 3.0) * 72 + 0.01 and 36 <= float(y) <= (11 - 0.5 - 3.0) * 72 + 0.01
+    one = engine.print_pages(items[:1], {"orn": 3.0}, "a4", show="shape", ink="outline", names=False, copies=3)
+    assert len(one) == 1 and one[0].count("<g transform") == 3 and "in tall" not in one[0]
+    assert 'stroke-width="0.7"' in one[0] and "stroke-dasharray" not in one[0]

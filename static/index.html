@@ -94,6 +94,7 @@ body.home #right{display:none}
 .sec small.note{color:var(--dim);font-size:12px;line-height:1.35}
 input[type=color]{width:100%;height:32px;padding:2px;background:var(--bg);border:1px solid var(--line);border-radius:6px;cursor:pointer}
 #orn{aspect-ratio:auto;height:230px}
+#m3dPic{width:100%;height:210px;object-fit:contain;background:var(--bg);border-radius:10px;border:1px solid var(--line)}
 #size.bad{color:#f0b35a}
 #tip{position:fixed;z-index:50;max-width:280px;background:#0d0f11;color:var(--text);border:1px solid #566070;border-radius:8px;padding:7px 10px;font-size:12.5px;line-height:1.4;box-shadow:0 6px 20px #000c;pointer-events:none}
 #ask{position:fixed;inset:0;z-index:40;background:#000a;display:flex;align-items:center;justify-content:center;padding:20px}
@@ -189,7 +190,8 @@ input[type=color]{width:100%;height:32px;padding:2px;background:var(--bg);border
         <span id="gCount"></span>
         <span class="grow"></span>
         <button id="gAll" data-tip="Tick every card shown, or untick them all. With cards ticked, the buttons to the right act on just those."></button>
-        <button id="gProof" data-tip="A page to print on plain paper: every silhouette at its real size on its ornament, with names. Check likeness and fit before cutting.">Proof sheet</button>
+        <button id="gProof" data-tip="A print preview of everyone at real size, on their ornaments or alone, with names. Print it on plain paper to check likeness and fit before cutting, or to cut out by hand.">Print…</button>
+        <button id="g3d" data-tip="3D-print files for everyone in one zip: each child's whole ornament and their silhouette alone, as STL, using the sizes under 3D printing.">3D files</button>
         <button id="gZip" data-tip="One SVG file per child, in a zip, ready to upload to Cricut Design Space."></button>
         <select id="mat" data-tip="The cutting area the sheet is laid out for. Design Space may shrink a file taller than 11.5 in, so check its size after uploading a 12 × 24 sheet.">
           <option value="11.5x11.5">12 × 12 mat</option>
@@ -279,6 +281,29 @@ input[type=color]{width:100%;height:32px;padding:2px;background:var(--bg);border
         </div>
         <button class="primary" id="svgBtn" data-tip="The cut file for this child. In Cricut Design Space: Upload, choose the file, add it to the canvas.">Download SVG for Cricut</button>
         <button id="pngBtn" data-tip="A picture of the silhouette on a clear background, for printing or sharing. No lettering.">Download PNG</button>
+        <button id="printBtn" data-tip="Opens a print preview of this child at real size: on the ornament or the silhouette alone, solid or as an outline. Print it at 100% and it comes out the size set here. You can also save it as a PDF from there.">Print…</button>
+      </div>
+    </details>
+
+    <details class="sec" id="sec3d">
+      <summary>3D printing</summary>
+      <div class="in">
+        <img id="m3dPic" alt="" data-tip="A picture of the 3D file as it is now: the ornament with the silhouette and lettering standing up from it, in the colours chosen under Ornament and size.">
+        <div class="row">
+          <label class="field" style="flex:1" data-tip="How thick the ornament itself is, in millimetres."><span>Ornament thickness (mm)</span><input type="number" id="baseMm" min="0.4" max="30" step="0.2"></label>
+          <label class="field" style="flex:1" data-tip="How far the silhouette and the lettering stand up from the ornament, in millimetres."><span>Silhouette raised by (mm)</span><input type="number" id="raiseMm" min="0.2" max="20" step="0.2"></label>
+        </div>
+        <div class="row">
+          <label class="field" style="flex:1.5" data-tip="Where the ribbon goes. Automatic makes a hole near the top when it clears the silhouette and lettering, and otherwise a loop standing on the top edge."><span>For hanging</span><select id="hang"><option value="auto">Automatic</option><option value="hole">A hole near the top</option><option value="loop">A loop on top</option><option value="none">Nothing</option></select></label>
+          <label class="field" style="flex:1" data-tip="How wide the opening for the ribbon is, in millimetres."><span>Opening (mm)</span><input type="number" id="holeMm" min="1" max="15" step="0.5"></label>
+        </div>
+        <button class="primary" id="stlOrn" data-tip="The whole ornament as one STL file, in millimetres: open it in your slicer (Bambu Studio, OrcaSlicer, PrusaSlicer, Cura). For two colours on a one-colour printer, add a filament change where the silhouette starts.">Download the whole ornament (STL)</button>
+        <button id="stlParts" data-tip="The same ornament as separate pieces in a zip (ornament, silhouette, lettering), for a printer that changes colours by itself. Drag all the pieces into the slicer together and load them as one object with several parts, then give each its own filament.">Ornament in colour parts (zip)</button>
+        <div class="row">
+          <label class="field" style="flex:1" data-tip="How thick the silhouette is when it is printed alone, in millimetres."><span>Thickness (mm)</span><input type="number" id="thickMm" min="0.4" max="30" step="0.2"></label>
+          <button id="stlSil" style="flex:1.4;align-self:flex-end" data-tip="Just the silhouette as a flat piece, without the ornament or lettering: to glue onto a wooden ornament in place of vinyl.">Silhouette alone (STL)</button>
+        </div>
+        <small class="note" id="m3dNote"></small>
       </div>
     </details>
 
@@ -307,8 +332,8 @@ input[type=color]{width:100%;height:32px;padding:2px;background:var(--bg);border
       <li><b>Fix the shape</b> if needed. The orange line is what will be cut. Use <b>Add</b> and <b>Erase</b> to paint parts in or out, <b>Neckline</b> to move the bottom cut, <b>Turn</b> and <b>Straighten</b> if the photo is crooked.</li>
       <li><b>Choose the ornament</b>: its shape and size, and how tall the silhouette is. The picture at the top right shows exactly how it will sit.</li>
       <li><b>Lettering</b> (optional): the name and a second line, straight or curved.</li>
-      <li><b>Print a proof sheet</b> from the gallery on plain paper to check everything at real size.</li>
-      <li><b>Download</b> the SVG and upload it in Cricut Design Space.</li>
+      <li><b>Print…</b> shows a preview of the pages and prints at real size on plain paper: check likeness and fit before cutting. Set the print scale to 100%.</li>
+      <li><b>Download</b> the SVG and upload it in Cricut Design Space. For a 3D printer, <b>3D printing</b> gives the whole ornament or the silhouette alone as STL files.</li>
       <li><b>Afterwards</b>, you can delete the photos and keep only the silhouettes, and back everything up.</li>
     </ol>
     <h3>Mouse and keys, on the photo</h3>

@@ -232,16 +232,61 @@ def test_sheet_is_laid_out_for_the_chosen_mat(client):
     assert long_mat.count("<path") == 12
 
 
-def test_proof_sheet_shows_every_child_at_real_size(client):
+def test_print_page_shows_every_child_at_real_size(client):
     add(client, name="Ava <b>.jpg")
     add(client, name="Ben.jpg")
-    r = client.get("/proof?orn=3", base_url=BASE)
+    r = client.get("/print?orn=3", base_url=BASE)
     page = r.data.decode()
-    assert r.status_code == 200 and page.count("<figure>") == 2
-    assert 'width="3.0000in" height="3.0000in"' in page and "stroke-dasharray" in page
-    assert "Ava &lt;b&gt;" in page and "<b>" not in page  # names cannot inject markup
-    assert "2.25 in tall" in page and "/static/proof.js" in page and "<script>" not in page
-    assert client.get("/proof?ids=000000000000", base_url=BASE).status_code == 404
+    assert r.status_code == 200 and page.count('<div class="sheet">') == 1
+    assert 'width="8.5000in" height="11.0000in"' in page and "@page{size:8.5in 11.0in;margin:0}" in page
+    assert "stroke-dasharray" in page  # the ornament, dashed
+    assert f'width="{2 * 72:.2f}"' in page  # the 2 inch bar that proves the scale
+    assert "Ava &lt;b&gt;" in page and "<b>.jpg" not in page and "Ava <b>" not in page  # names cannot inject markup
+    assert "2.25 in tall" in page and "/static/print.js" in page and "<script>" not in page
+    assert client.get("/print?ids=000000000000", base_url=BASE).status_code == 404
+    assert client.get("/proof?orn=3", base_url=BASE).status_code == 200  # the old address still works
+
+
+def test_print_page_choices(client):
+    a = add(client)
+    q = f"/print?ids={a['id']}&orn=3&name_on=1&font=serif"
+    plain = client.get(q, base_url=BASE).data.decode()
+    page = client.get(q + "&paper=a4&show=shape&ink=outline&names=0&copies=20", base_url=BASE).data.decode()
+    assert 'width="8.2677in"' in page and "stroke-dasharray" not in page  # A4, no ornament
+    assert 'fill="none" stroke="#000000"' in page and 'fill="none" stroke="#000000"' not in plain
+    assert "in tall" not in page and "in tall" in plain
+    assert page.count('<div class="sheet">') > plain.count('<div class="sheet">') == 1  # 20 copies need more pages
+    assert f'name="ids" value="{a["id"]}"' in page and 'name="font" value="serif"' in page  # choices keep the rest
+    assert '<option value="a4" selected>' in page
+
+
+def _stl(data):
+    import numpy as np
+    n = int(np.frombuffer(data[80:84], "<u4")[0])
+    assert len(data) == 84 + 50 * n
+    return np.frombuffer(data[84:], dtype=np.dtype([("n", "<f4", 3), ("v", "<f4", (3, 3)), ("a", "<u2")]))["v"]
+
+
+def test_3d_files_download(client):
+    a = add(client)
+    url = f"/api/items/{a['id']}/model"
+    r = client.get(f"{url}.stl?what=silhouette&thick_mm=2.5", base_url=BASE)
+    v = _stl(r.data)
+    assert r.status_code == 200 and "Ava silhouette.stl" in r.headers["Content-Disposition"]
+    size = v.reshape(-1, 3).max(0) - v.reshape(-1, 3).min(0)
+    assert abs(size[1] - 2.25 * 25.4) < 0.3 and abs(size[2] - 2.5) < 1e-4  # millimetres, at the size set
+    r = client.get(f"{url}.stl?what=ornament&orn=3&hang=none&base_mm=3&raise_mm=1.2", base_url=BASE)
+    size = _stl(r.data).reshape(-1, 3).max(0) - _stl(r.data).reshape(-1, 3).min(0)
+    assert abs(size[0] - 76.2) < 0.05 and abs(size[1] - 76.2) < 0.05 and abs(size[2] - 4.2) < 1e-4
+    z = zipfile.ZipFile(io.BytesIO(client.get(f"{url}.zip?what=parts&orn=3&name_on=1", base_url=BASE).data))
+    assert sorted(z.namelist()) == ["Ava ornament - base.stl", "Ava ornament - lettering.stl",
+                                    "Ava ornament - silhouette.stl", "How to use these files.txt"]
+    r = client.get(f"{url}.png?orn=3&fg=%23112233", base_url=BASE)
+    assert r.status_code == 200 and r.data[:4] == b"\x89PNG"
+    assert client.get(f"{url}.stl?what=nonsense", base_url=BASE).status_code == 404
+    b = add(client, name="Ben.jpg")
+    z = zipfile.ZipFile(io.BytesIO(client.get(f"/api/models.zip?ids={a['id']},{b['id']}", base_url=BASE).data))
+    assert sorted(z.namelist()) == ["Ava ornament.stl", "Ava silhouette.stl", "Ben ornament.stl", "Ben silhouette.stl"]
 
 
 def test_deleting_the_photo_keeps_the_silhouette(client):
@@ -399,5 +444,7 @@ def test_advice_for_different_computers(hw, recommend, best):
 
 def test_this_computer_can_be_examined():
     hw = engine.hardware()
-    assert set(hw) == {"gpu", "vram_gb", "ram_gb", "gpu_runtime"} and hw["ram_gb"] > 0.5
+    assert set(hw) == {"gpu", "vram_gb", "ram_gb", "gpu_runtime", "runtime"} and hw["ram_gb"] > 0.5
+    assert hw["runtime"] in ("nvidia", "directml", "cpu") and hw["gpu_runtime"] == (hw["runtime"] != "cpu")
+    assert engine.cuda_works() in (True, False) and (engine.runtime() == "nvidia" or not engine.cuda_works())
     assert hw["gpu"] is None or isinstance(hw["gpu"], str)

@@ -22,8 +22,9 @@ from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 from PIL import Image
 
 import engine
+import model3d
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 ROOT = Path(__file__).resolve().parent
 
 
@@ -549,18 +550,21 @@ def list_fonts():
                     "old": {k: engine.resolve_font(k) for k in ("serif", "sans", "bold", "script")}})
 
 
-PROOF_CSS = """
-body{font:14px/1.4 "Segoe UI",system-ui,sans-serif;color:#111;margin:0.4in}
-header{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:0.2in}
-h1{font-size:18px;margin:0}
-.rule{width:2in;height:0.12in;background:#111}
-.note{color:#444;font-size:12px}
-main{display:flex;flex-wrap:wrap;gap:0.15in}
-figure{margin:0;text-align:center;break-inside:avoid}
-figure svg{display:block}
-figcaption{font-size:12px}
-@media print{button{display:none}body{margin:0}}
-@page{margin:0.5in}
+PRINT_CSS = """
+body{font:14px/1.4 "Segoe UI",system-ui,sans-serif;color:#111;margin:0;background:#8a8f98}
+.bar{position:sticky;top:0;z-index:2;background:#fff;border-bottom:1px solid #c9ccd1;padding:10px 16px;
+  display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.bar h1{font-size:16px;margin:0 6px 0 0}
+.bar label{display:flex;gap:6px;align-items:center;font-size:13px}
+.bar select,.bar input[type=number]{font:inherit;padding:3px 6px}
+.bar input[type=number]{width:52px}
+.bar button{font:inherit;font-weight:600;padding:6px 18px;border:0;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer}
+.how{flex-basis:100%;margin:0;font-size:12.5px;color:#333}
+.count{color:#555;font-size:13px}
+.sheet{background:#fff;margin:18px auto;box-shadow:0 2px 12px #0006;width:var(--pw);height:var(--ph);overflow:hidden}
+.sheet svg{display:block}
+@media print{body{background:none}.bar{display:none}.sheet{margin:0;box-shadow:none;break-after:page}
+  .sheet:last-child{break-after:auto}}
 """
 
 
@@ -586,31 +590,110 @@ def preview(item_id):
                     "html": on["body"] + hole, "fits": on["fits"]})
 
 
-@app.get("/proof")
-def proof_sheet():
-    """A page to print on plain paper: every shape at its real size, on its ornament."""
+@app.get("/print")
+@app.get("/proof")  # what the page was called before it had choices
+def print_page():
+    """A print preview: the pages exactly as they will come out, at real size,
+    with choices for the paper and what is drawn. The browser prints it."""
     items = _chosen()
     if not items:
         abort(409)
-    o = _export_opts()
-    u, figs = engine.UNITS_PER_INCH, []
-    dashed = 'fill="none" stroke="#888" stroke-width="0.75" stroke-dasharray="4 3"'
-    for name, res, settings in items:
-        on = engine.on_ornament(name, res, settings, o, orn_attrs=dashed)
-        tall = engine.size_in(res, settings)[1]
-        figs.append(f'<figure><svg xmlns="http://www.w3.org/2000/svg" width="{on["w"]:.4f}in" height="{on["h"]:.4f}in" '
-                    f'viewBox="0 0 {on["w"] * u:.2f} {on["h"] * u:.2f}">{on["body"]}</svg>'
-                    f'<figcaption>{html.escape(name) or "Unnamed"} &middot; {tall:.2f} in tall'
-                    f'{"" if on["fits"] else " &middot; <b>does not fit</b>"}</figcaption></figure>')
+    a, o = request.args, _export_opts()
+    paper = a.get("paper") if a.get("paper") in engine.PAPERS else "letter"
+    show = "shape" if a.get("show") == "shape" else "ornament"
+    ink = "outline" if a.get("ink") == "outline" else "solid"
+    names = a.get("names", "1") != "0"
+    copies = int(_num(a.get("copies"), 1, 20, 1))
+    pages = engine.print_pages(items, o, paper, show, ink, names, copies)
+    pw, ph, _ = engine.PAPERS[paper]
+
+    def pick(key, value, choices):
+        opts = "".join(f'<option value="{k}"{" selected" if k == value else ""}>{html.escape(v)}</option>' for k, v in choices)
+        return f'<select name="{key}">{opts}</select>'
+
+    ours = ("paper", "show", "ink", "names", "copies")
+    kept = "".join(f'<input type="hidden" name="{html.escape(k)}" value="{html.escape(v)}">'
+                   for k, v in a.items() if k not in ours)
     ow, oh = engine.orn_size(engine._opts(o))
-    kind = engine.ORNAMENTS[o["shape"]].lower()
-    size = f"{ow:g} in" if ow == oh else f"{ow:g} × {oh:g} in"
-    page = (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Silhouette proof sheet</title>'
-            f'<style>{PROOF_CSS}</style></head><body><header><h1>Proof sheet</h1><button id="print">Print</button>'
-            f'<div class="rule"></div><div class="note">Print at 100% (&ldquo;Actual size&rdquo;, not &ldquo;Fit&rdquo;). '
-            f'The black bar should measure exactly 2 inches. The dashed outline is the {size} {kind} ornament.</div></header>'
-            f'<main>{"".join(figs)}</main><script src="/static/proof.js"></script></body></html>')
-    return page
+    size = f"{ow:g} in" if ow == oh else f"{ow:g} \u00d7 {oh:g} in"
+    orn = f" The dashed line is the {size} {engine.ORNAMENTS[o['shape']].lower()} ornament." if show == "ornament" else ""
+    n = len(items)
+    bar = (f'<form class="bar" id="opts" method="get" action="/print">{kept}<h1>Print</h1>'
+           f'<label>Paper {pick("paper", paper, [(k, v[2]) for k, v in engine.PAPERS.items()])}</label>'
+           f'<label>Show {pick("show", show, [("ornament", "On the ornament"), ("shape", "Silhouette only")])}</label>'
+           f'<label>Ink {pick("ink", ink, [("solid", "Solid black"), ("outline", "Outline only")])}</label>'
+           f'<label>Names {pick("names", "1" if names else "0", [("1", "Under each"), ("0", "None")])}</label>'
+           f'<label>Copies of each <input type="number" name="copies" min="1" max="20" value="{copies}"></label>'
+           f'<button type="button" id="print">Print\u2026</button>'
+           f'<span class="count">{n} {"child" if n == 1 else "children"} \u00b7 {len(pages)} page{"" if len(pages) == 1 else "s"}</span>'
+           f'<p class="how">Below is each page as it will print. In the print window set <b>Scale</b> to <b>100%</b> '
+           f'(or \u201cActual size\u201d), not \u201cFit to page\u201d; then everything comes out the size you set. To check, '
+           f'measure the black bar on the paper: it is exactly 2 inches.{orn} To save a PDF instead, choose '
+           f'\u201cSave as PDF\u201d as the printer.</p></form>')
+    sheets = "".join(f'<div class="sheet">{pg[pg.index("<svg"):]}</div>' for pg in pages)
+    return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Print silhouettes</title>'
+            f'<style>{PRINT_CSS}:root{{--pw:{pw}in;--ph:{ph}in}}@page{{size:{pw}in {ph}in;margin:0}}</style></head>'
+            f'<body>{bar}{sheets}<script src="/static/print.js"></script></body></html>')
+
+
+def _model_sizes() -> dict:
+    """Thicknesses for the 3D files, from the page's query string (mm)."""
+    a = request.args
+    d = model3d.DEFAULTS
+    return {"base_mm": _num(a.get("base_mm"), 0.4, 30.0, d["base_mm"]),
+            "raise_mm": _num(a.get("raise_mm"), 0.2, 20.0, d["raise_mm"]),
+            "thick_mm": _num(a.get("thick_mm"), 0.4, 30.0, d["thick_mm"]),
+            "hole_mm": _num(a.get("hole_mm"), 1.0, 15.0, d["hole_mm"]),
+            "hang": a.get("hang") if a.get("hang") in model3d.HANG else "auto"}
+
+
+def _send(data: bytes, mimetype: str, filename: str):
+    return send_file(io.BytesIO(data), mimetype=mimetype, as_attachment=True, download_name=filename)
+
+
+@app.get("/api/items/<item_id>/model.<ext>")
+def export_model(item_id, ext):
+    """For a 3D printer. what=silhouette: the silhouette alone. what=ornament:
+    the whole ornament in one piece. what=parts: the ornament as a zip of
+    pieces, for printing in more than one colour. model.png is a picture of it."""
+    d = _dir(item_id)
+    meta = _meta(d)
+    res = _result(d, meta)
+    if not res["loops"]:
+        abort(409)
+    what, sizes, o = request.args.get("what", "ornament"), _model_sizes(), _export_opts()
+    name, label = meta["name"], _safe_name(meta["name"])
+    if ext == "png":
+        name = request.args.get("name", name)[:60]  # the name as it is being typed
+        fg, bg = _colour(request.args.get("fg"), "#111111"), _colour(request.args.get("bg"), engine.BORDER_FILL)
+        data = (model3d.silhouette_picture(res, meta["settings"], sizes, fg) if what == "silhouette"
+                else model3d.ornament_picture(name, res, meta["settings"], o, sizes, bg, fg))
+        return send_file(io.BytesIO(data), mimetype="image/png")
+    if ext == "stl" and what == "silhouette":
+        return _send(model3d.silhouette_stl(res, meta["settings"], sizes), "model/stl", f"{label} silhouette.stl")
+    if ext == "stl" and what == "ornament":
+        return _send(model3d.ornament_stl(name, res, meta["settings"], o, sizes), "model/stl", f"{label} ornament.stl")
+    if ext == "zip" and what == "parts":
+        parts = model3d.ornament_parts(name, res, meta["settings"], o, sizes)
+        return _send(model3d.parts_zip(f"{label} ornament", parts), "application/zip", f"{label} ornament parts.zip")
+    abort(404)
+
+
+@app.get("/api/models.zip")
+def export_models():
+    """Every chosen child's 3D files in one zip: the ornament and the silhouette alone."""
+    items = _chosen()
+    if not items:
+        abort(409)
+    buf, used, sizes, o = io.BytesIO(), {}, _model_sizes(), _export_opts()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, res, settings in items:
+            base = _safe_name(name)
+            used[base.lower()] = n = used.get(base.lower(), 0) + 1
+            base += "" if n == 1 else f" ({n})"
+            z.writestr(f"{base} ornament.stl", model3d.ornament_stl(name, res, settings, o, sizes))
+            z.writestr(f"{base} silhouette.stl", model3d.silhouette_stl(res, settings, sizes))
+    return _send(buf.getvalue(), "application/zip", "silhouettes-3d.zip")
 
 
 BACKUP_FILES = ("meta.json", "mask.png", "start.png", "photo.jpg")

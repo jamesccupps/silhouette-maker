@@ -10,6 +10,7 @@ const prefs = Object.assign({
   ornShape: "circle", ornD: 3, ornH: 4, ornColor: "#d9b27c", vinylColor: "#111111", // the ornament
   nameOn: false, line2: "", place: "below", font: "serif", tsize: 0.3, font2: "", tsize2: 0.24, // lettering ("" = same font as the name)
   border: "none", space: 0, // what the files have behind the silhouette
+  baseMm: 3, raiseMm: 1, thickMm: 2, holeMm: 4, hang: "auto", // 3D printing, in millimetres
 }, readPrefs());
 if (prefs.text === "name" || prefs.text === "both") prefs.nameOn = true; // from the version before
 delete prefs.text;
@@ -99,7 +100,7 @@ function renderGallery() {
   const withPhoto = n ? targets().filter((it) => it.photo).length : 0;
   $("gForget").textContent = withPhoto ? `Delete ${withPhoto} photo${withPhoto > 1 ? "s" : ""} only` : "Delete photos only";
   $("gForget").disabled = !withPhoto;
-  $("gProof").disabled = !targets().some((it) => it.outline.bbox);
+  $("gProof").disabled = $("g3d").disabled = !targets().some((it) => it.outline.bbox);
   $("gDone").textContent = n && targets().every((it) => it.done) ? "Mark not finished" : "Mark finished";
   $("gZip").disabled = $("gSheet").disabled = !targets().some((it) => it.outline.bbox);
 }
@@ -145,7 +146,11 @@ $("gDel").onclick = () => {
 $("gProof").onclick = async () => {
   flushSettings();
   await queue;
-  window.open(`/proof${idsQuery()}&${exportQuery()}`, "_blank");
+  window.open(`/print${idsQuery()}&${exportQuery()}`, "_blank");
+};
+$("g3d").onclick = () => {
+  busy("Making the 3D files…", 6000);
+  download(`/api/models.zip${idsQuery()}&${modelQuery()}`);
 };
 $("gForget").onclick = () => {
   const list = targets().filter((it) => it.photo);
@@ -237,6 +242,11 @@ function fillOptions() { // the choices that apply to every child
   $("font2").value = prefs.font2; $("tsize2").value = prefs.tsize2;
   if (document.activeElement !== $("line2")) $("line2").value = prefs.line2;
   $("border").value = prefs.border; $("space").value = prefs.space; $("space").disabled = prefs.border === "ornament";
+  $("baseMm").value = prefs.baseMm; $("raiseMm").value = prefs.raiseMm; $("thickMm").value = prefs.thickMm;
+  $("hang").value = prefs.hang; $("holeMm").value = prefs.holeMm; $("holeMm").disabled = prefs.hang === "none";
+  $("m3dNote").textContent = `Sizes are in millimetres; the ornament comes out ${(+prefs.baseMm + +prefs.raiseMm).toFixed(1)} mm thick in all. ` +
+    `For two colours on a one-colour printer, add a filament change at ${(+prefs.baseMm).toFixed(1)} mm, where the silhouette starts. ` +
+    "Letters with strokes thinner than the nozzle will not print: make the lettering bigger or bolder.";
 }
 function labels() {
   $("smoothV").textContent = cur.settings.smooth;
@@ -246,7 +256,7 @@ function labels() {
 function showOutline() {
   const o = cur.outline;
   outlinePath = o.d ? new Path2D(o.d) : null;
-  $("svgBtn").disabled = $("pngBtn").disabled = !o.bbox;
+  for (const id of ["svgBtn", "pngBtn", "printBtn", "stlOrn", "stlParts", "stlSil"]) $(id).disabled = !o.bbox;
   refreshItem(cur); draw(); refreshPreview();
 }
 // The picture of the ornament comes from the server, drawn by the same code
@@ -270,7 +280,27 @@ function refreshPreview() {
     $("size").classList.toggle("bad", bad);
     $("size").textContent = !o.bbox ? "Nothing left to cut. Paint with Add, or move the neckline."
       : `Silhouette ${o.height_in.toFixed(2)} in tall × ${o.width_in.toFixed(2)} in wide` + (bad ? " · too big for this ornament" : "");
+    show3d();
   }, 90);
+}
+// The picture of the 3D file, also drawn by the server from the real model.
+// Only while that section is open: it takes a moment to make.
+let pic3dTimer = 0;
+function show3d() {
+  clearTimeout(pic3dTimer);
+  if (!$("sec3d").open || !cur) return;
+  pic3dTimer = setTimeout(async () => {
+    const it = cur;
+    await queue;
+    if (it !== cur) return;
+    if (!it.outline.bbox) { $("m3dPic").removeAttribute("src"); return; }
+    $("m3dPic").src = `/api/items/${it.id}/model.png?what=ornament&${modelQuery()}&name=${encodeURIComponent(it.name)}` +
+      `&fg=${encodeURIComponent(prefs.vinylColor)}&bg=${encodeURIComponent(prefs.ornColor)}&v=${Date.now()}`;
+  }, 250);
+}
+$("sec3d").addEventListener("toggle", show3d);
+function modelQuery() { // the 3D sizes, on top of the ornament and lettering choices
+  return `${exportQuery()}&base_mm=${prefs.baseMm}&raise_mm=${prefs.raiseMm}&thick_mm=${prefs.thickMm}&hole_mm=${prefs.holeMm}&hang=${prefs.hang}`;
 }
 let patchTimer = 0, patchWaiting = null; // patchWaiting: the photo whose change has not been sent yet
 function pushSettings(delay = 180) {
@@ -357,6 +387,11 @@ option("font2", "change", (t) => { prefs.font2 = t.value; });
 option("tsize2", "change", (t) => { prefs.tsize2 = num(t, 0.08, 2, 0.24); });
 option("border", "change", (t) => { prefs.border = t.value; });
 option("space", "change", (t) => { prefs.space = Math.min(6, Math.max(0, +t.value || 0)); });
+option("baseMm", "change", (t) => { prefs.baseMm = num(t, 0.4, 30, 3); });
+option("raiseMm", "change", (t) => { prefs.raiseMm = num(t, 0.2, 20, 1); });
+option("thickMm", "change", (t) => { prefs.thickMm = num(t, 0.4, 30, 2); });
+option("holeMm", "change", (t) => { prefs.holeMm = num(t, 1, 15, 4); });
+option("hang", "change", (t) => { prefs.hang = t.value; });
 $("quality").addEventListener("change", (e) => { prefs.quality = e.target.value; prefs.qualityChosen = true; savePrefs(); showCutMode(); });
 
 async function download(url) {
@@ -368,6 +403,15 @@ async function download(url) {
 }
 $("svgBtn").onclick = () => download(`/api/items/${cur.id}/export.svg?${exportQuery()}`);
 $("pngBtn").onclick = () => download(`/api/items/${cur.id}/export.png?${exportQuery()}`);
+$("printBtn").onclick = async () => {
+  const it = cur;
+  flushSettings(); // the page must match what is on screen
+  await queue;
+  window.open(`/print?ids=${it.id}&${exportQuery()}`, "_blank");
+};
+$("stlOrn").onclick = () => download(`/api/items/${cur.id}/model.stl?what=ornament&${modelQuery()}`);
+$("stlParts").onclick = () => download(`/api/items/${cur.id}/model.zip?what=parts&${modelQuery()}`);
+$("stlSil").onclick = () => download(`/api/items/${cur.id}/model.stl?what=silhouette&${modelQuery()}`);
 $("redo").onclick = () => {
   if (!confirm("Run the automatic cut-out again? It replaces your brush edits and becomes the new starting point. (History can still take you back while this photo is open.)")) return;
   const it = cur;
@@ -416,7 +460,10 @@ function showCutMode() {
   if (!hw) return;
   const card = hw.gpu ? `${hw.gpu}${hw.vram_gb ? `, ${hw.vram_gb} GB` : ""}` : "No graphics card found";
   $("hwLine").textContent = `${card}. ${hw.recommend === "best" ? "Best" : "Fast"} suits this computer.`;
-  $("hwLine").dataset.tip = `${card}; ${hw.ram_gb} GB of memory. ${hw.why}`;
+  const how = { nvidia: " Cut-outs run on NVIDIA's own runtime, the quickest.", directml: " Cut-outs run on the graphics card through DirectML.", cpu: " Cut-outs run on the processor." }[hw.runtime] || "";
+  const faster = hw.runtime === "directml" && /nvidia|geforce|rtx|gtx/i.test(hw.gpu || "")
+    ? " This is an NVIDIA card: closing the app and running \"setup.bat nvidia\" in its folder makes Best about ten times faster (a 2.2 GB download, once)." : "";
+  $("hwLine").dataset.tip = `${card}; ${hw.ram_gb} GB of memory. ${hw.why}${how}${faster}`;
 }
 function howLong(kind, n) { // "about 11 s a photo here", plus the total for a batch
   const s = hw && hw.secs[kind];
