@@ -96,6 +96,14 @@ input[type=color]{width:100%;height:32px;padding:2px;background:var(--bg);border
 #orn{aspect-ratio:auto;height:230px}
 #size.bad{color:#f0b35a}
 #tip{position:fixed;z-index:50;max-width:280px;background:#0d0f11;color:var(--text);border:1px solid #566070;border-radius:8px;padding:7px 10px;font-size:12.5px;line-height:1.4;box-shadow:0 6px 20px #000c;pointer-events:none}
+#ask{position:fixed;inset:0;z-index:40;background:#000a;display:flex;align-items:center;justify-content:center;padding:20px}
+#ask .sheet{background:var(--panel);border:1px solid var(--line);border-radius:14px;width:560px;max-width:100%;padding:22px 26px;display:flex;flex-direction:column;gap:12px}
+#ask h2{margin:0;font-size:19px}
+#ask .opt{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border:1px solid var(--line);border-radius:10px;cursor:pointer}
+#ask .opt:has(input:checked){border-color:var(--accent);background:var(--panel2)}
+#ask .opt input{margin-top:4px;accent-color:var(--accent)}
+#ask .rec{margin-left:8px;font-size:11px;background:var(--accent);color:var(--accent-text);border-radius:10px;padding:1px 8px;font-weight:600}
+#ask .foot{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:4px}
 #help{position:fixed;inset:0;z-index:40;background:#000a;display:flex;align-items:center;justify-content:center;padding:20px}
 #help .sheet{background:var(--panel);border:1px solid var(--line);border-radius:14px;max-width:760px;max-height:100%;overflow:auto;padding:22px 26px;cursor:default}
 #help h2{margin:0 0 4px;font-size:20px}
@@ -113,6 +121,9 @@ input[type=color]{width:100%;height:32px;padding:2px;background:var(--bg);border
     <div><h1>Silhouette Maker</h1><div class="private">Photos stay on this computer.</div></div>
     <button class="primary" id="addBtn" data-tip="Choose one or more side-on photos. Each is cut out automatically. You can also drag photos onto this window.">Add photos…</button>
     <input type="file" id="file" accept="image/*,.heic,.heif" multiple hidden>
+    <label class="field" data-tip="How new photos are cut out. Best follows hair and faces more closely but is slower and needs a good graphics card; Fast works on any computer. Ask each time lets you choose for every batch."><span>Cut-out method</span>
+      <select id="cutMode"><option value="ask">Ask each time</option><option value="best">Best (slower)</option><option value="fast">Fast</option></select></label>
+    <div class="private" id="hwLine" data-tip="What the app found when it looked at this computer, and the method it recommends."></div>
   </header>
   <div id="list"></div>
   <footer>
@@ -308,6 +319,21 @@ input[type=color]{width:100%;height:32px;padding:2px;background:var(--bg);border
       <div><kbd>Ctrl</kbd>+<kbd>Z</kbd> undo · <kbd>Ctrl</kbd>+<kbd>Y</kbd> redo</div><div><kbd>Esc</kbd> back to the gallery</div>
     </div>
     <div class="foot"><span class="private">Everything is saved as you work. Photos never leave this computer.</span><button class="primary" id="helpClose">Got it</button></div>
+  </div>
+</div>
+<div id="ask" hidden>
+  <div class="sheet">
+    <h2 id="askTitle"></h2>
+    <div class="private" id="askHw"></div>
+    <label class="opt"><input type="radio" name="askQ" value="best">
+      <div><b>Best</b><span class="rec" id="recBest">Recommended here</span><div class="private" id="askBest"></div></div></label>
+    <label class="opt"><input type="radio" name="askQ" value="fast">
+      <div><b>Fast</b><span class="rec" id="recFast">Recommended here</span><div class="private" id="askFast"></div></div></label>
+    <div class="private" id="askWhy"></div>
+    <div class="foot">
+      <label class="check" data-tip="You can change this any time under Cut-out method, on the left."><input type="checkbox" id="askRemember"> Use this from now on without asking</label>
+      <span><button id="askCancel">Cancel</button> <button class="primary" id="askGo"></button></span>
+    </div>
   </div>
 </div>
 <div id="tip" hidden></div>

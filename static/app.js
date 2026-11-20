@@ -5,7 +5,8 @@ const mask = document.createElement("canvas"), mctx = mask.getContext("2d", { wi
 const tint = document.createElement("canvas"), tctx = tint.getContext("2d");
 
 const prefs = Object.assign({
-  height: 2.25, quality: "best", grid: false, mat: "11.5x11.5",
+  height: 2.25, grid: false, mat: "11.5x11.5",
+  quality: "best", askQuality: true, // the cut-out method; until you choose one, what suits this computer
   ornShape: "circle", ornD: 3, ornH: 4, ornColor: "#d9b27c", vinylColor: "#111111", // the ornament
   nameOn: false, line2: "", place: "below", font: "serif", tsize: 0.3, font2: "", tsize2: 0.24, // lettering ("" = same font as the name)
   border: "none", space: 0, // what the files have behind the silhouette
@@ -356,7 +357,7 @@ option("font2", "change", (t) => { prefs.font2 = t.value; });
 option("tsize2", "change", (t) => { prefs.tsize2 = num(t, 0.08, 2, 0.24); });
 option("border", "change", (t) => { prefs.border = t.value; });
 option("space", "change", (t) => { prefs.space = Math.min(6, Math.max(0, +t.value || 0)); });
-$("quality").addEventListener("change", (e) => { prefs.quality = e.target.value; savePrefs(); });
+$("quality").addEventListener("change", (e) => { prefs.quality = e.target.value; prefs.qualityChosen = true; savePrefs(); showCutMode(); });
 
 async function download(url) {
   flushSettings(); // the file must match what is on screen
@@ -402,15 +403,78 @@ $("del").onclick = () => {
 /* ---------- adding photos ---------- */
 $("addBtn").onclick = () => $("file").click();
 $("file").onchange = (e) => { addFiles([...e.target.files]); e.target.value = ""; };
+/* What this computer can do, and how long cut-outs really take here. */
+let hw = null;
+async function loadHardware() {
+  try { hw = await api("GET", "/api/hardware"); } catch { return; }
+  if (!prefs.qualityChosen) { prefs.quality = hw.recommend; savePrefs(); } // nobody chose yet: what suits this computer
+  showCutMode();
+}
+function showCutMode() {
+  $("cutMode").value = prefs.askQuality ? "ask" : prefs.quality;
+  if (cur) $("quality").value = prefs.quality;
+  if (!hw) return;
+  const card = hw.gpu ? `${hw.gpu}${hw.vram_gb ? `, ${hw.vram_gb} GB` : ""}` : "No graphics card found";
+  $("hwLine").textContent = `${card}. ${hw.recommend === "best" ? "Best" : "Fast"} suits this computer.`;
+  $("hwLine").dataset.tip = `${card}; ${hw.ram_gb} GB of memory. ${hw.why}`;
+}
+function howLong(kind, n) { // "about 11 s a photo here", plus the total for a batch
+  const s = hw && hw.secs[kind];
+  if (!s) return kind === "fast" ? "About a second a photo." : "A few seconds a photo with a suitable graphics card; not timed on this computer yet.";
+  const total = s * n, each = s < 10 ? s.toFixed(1) : Math.round(s);
+  return `About ${each} s a photo on this computer` +
+    (n > 1 ? `: roughly ${total < 90 ? Math.round(total) + " s" : Math.round(total / 60) + " min"} for these ${n}.` : ".");
+}
+let askDone = null;
+function chooseQuality(n) { // ask before any work starts; resolves to "best", "fast" or null (cancelled)
+  $("askTitle").textContent = `How should ${n === 1 ? "this photo" : `these ${n} photos`} be cut out?`;
+  $("askHw").textContent = hw ? $("hwLine").dataset.tip.split(". ")[0] + "." : "";
+  $("askBest").textContent = "Follows hair, lashes and the face most closely. " + howLong("best", n) +
+    (hw && hw.best === "no" ? " It probably cannot run on this computer; if so, Fast is used instead and you are told." : "");
+  $("askFast").textContent = "Rougher around hair, so expect a little more touching up. " + howLong("fast", n);
+  $("askWhy").textContent = hw ? hw.why : "";
+  $("recBest").hidden = !hw || hw.recommend !== "best";
+  $("recFast").hidden = !hw || hw.recommend !== "fast";
+  const pick = prefs.qualityChosen ? prefs.quality : (hw ? hw.recommend : prefs.quality);
+  document.querySelector(`input[name=askQ][value=${pick}]`).checked = true;
+  $("askRemember").checked = false;
+  $("askGo").textContent = n === 1 ? "Cut it out" : `Cut out ${n} photos`;
+  $("ask").hidden = false;
+  $("askGo").focus();
+  return new Promise((res) => { askDone = res; });
+}
+function closeAsk(go) {
+  if (!askDone) return;
+  const quality = go ? document.querySelector("input[name=askQ]:checked").value : null;
+  if (quality) {
+    prefs.quality = quality; prefs.qualityChosen = true;
+    if ($("askRemember").checked) prefs.askQuality = false;
+    savePrefs(); showCutMode();
+  }
+  $("ask").hidden = true;
+  askDone(quality); askDone = null;
+}
+$("askGo").onclick = () => closeAsk(true);
+$("askCancel").onclick = () => closeAsk(false);
+$("ask").addEventListener("click", (e) => { if (e.target === $("ask")) closeAsk(false); });
+$("cutMode").addEventListener("change", (e) => {
+  prefs.askQuality = e.target.value === "ask";
+  if (!prefs.askQuality) { prefs.quality = e.target.value; prefs.qualityChosen = true; }
+  savePrefs(); showCutMode();
+});
+
 async function addFiles(files) {
   files = files.filter((f) => f.type.startsWith("image/") || /\.(jpe?g|png|webp|bmp|heic)$/i.test(f.name));
+  if (!files.length) return;
+  const quality = prefs.askQuality ? await chooseQuality(files.length) : prefs.quality;
+  if (!quality) return; // cancelled: nothing is processed
   let first = null, failed = 0, note = "";
   for (let i = 0; i < files.length; i++) {
     const text = `Cutting out ${i + 1} of ${files.length}…`;
     busy(text);
     const slow = setTimeout(() => busy(text + " The first time, the cut-out model is downloaded (up to 1 GB), so this can take a few minutes."), 30000);
     const fd = new FormData();
-    fd.append("photo", files[i]); fd.append("quality", prefs.quality); fd.append("height_in", prefs.height);
+    fd.append("photo", files[i]); fd.append("quality", quality); fd.append("height_in", prefs.height);
     try {
       const it = await api("POST", "/api/items", fd);
       items.push(it); first = first || it; note = it.note || note; renderList();
@@ -418,6 +482,7 @@ async function addFiles(files) {
     clearTimeout(slow);
   }
   busy(failed > 1 ? `${failed} photos could not be added. ${note}` : note, 8000);
+  loadHardware(); // the timings just changed
   if (first && !cur && files.length - failed === 1) select(first); // one photo: straight into the editor
 }
 addEventListener("dragover", (e) => { e.preventDefault(); document.body.classList.add("drag"); });
@@ -697,6 +762,8 @@ $("brush").addEventListener("input", draw);
 
 addEventListener("keydown", (e) => {
   if (/^(text|number|select-one)$/.test(e.target.type || "")) return;
+  if (e.key === "Escape" && !$("ask").hidden) { closeAsk(false); return; }
+  if (e.key === "Enter" && !$("ask").hidden) { closeAsk(true); return; }
   if (e.key === "Escape" && !$("help").hidden) { showHelp(false); return; }
   if (e.key === "Escape" && !$("hist").hidden) { showHist(false); return; }
   if (e.key === "Escape" && cur) { select(null); return; }
@@ -752,11 +819,13 @@ $("helpBtn").onclick = () => showHelp(true);
 $("helpClose").onclick = () => showHelp(false);
 $("help").addEventListener("click", (e) => { if (e.target === $("help")) showHelp(false); });
 if (!prefs.seenHelp) showHelp(true); // the first time the app is opened
+showCutMode();
 
 /* ---------- start ---------- */
 setTool("add"); setMode("overlay");
 (async () => {
   try { items = await api("GET", "/api/items"); } catch (e) { busy(e.message); }
+  loadHardware();
   loadFonts(); // not awaited: looking through the computer's fonts can take a few seconds
   renderList();
   fromHash();

@@ -363,3 +363,41 @@ def test_preview_is_drawn_like_the_files(client):
     client.put(f"/api/items/{it['id']}/mask", base_url=BASE, data=blank.getvalue())
     empty = client.get(url, base_url=BASE).get_json()
     assert empty["fits"] and "<path" not in empty["html"]  # nothing to cut: just the ornament
+
+
+def test_hardware_report_and_real_timings(client, monkeypatch):
+    monkeypatch.setattr(engine, "hardware", lambda: {"gpu": "Test Card 9000", "vram_gb": 12.0, "ram_gb": 32.0,
+                                                    "gpu_runtime": True})
+    r = client.get("/api/hardware", base_url=BASE).get_json()
+    assert (r["recommend"], r["best"], r["secs"]) == ("best", "yes", {"best": None, "fast": None})
+    assert "Test Card 9000" in r["why"]
+
+    add(client)  # the stand-in model answers as the fast one: a timing is recorded
+    r = client.get("/api/hardware", base_url=BASE).get_json()
+    assert r["secs"]["fast"] is not None and r["secs"]["best"] is None and r["recommend"] == "best"
+
+    client.post("/api/items", base_url=BASE, data={**photo(), "quality": "best"}, content_type="multipart/form-data")
+    r = client.get("/api/hardware", base_url=BASE).get_json()  # best was asked for and could not run
+    assert (r["recommend"], r["best"]) == ("fast", "no") and "could not run" in r["why"]
+    assert len(client.get("/api/items", base_url=BASE).get_json()) == 2  # the timing file is not a photo
+
+
+@pytest.mark.parametrize("hw, recommend, best", [
+    ({"gpu": "Big", "vram_gb": 12.0, "ram_gb": 32, "gpu_runtime": True}, "best", "yes"),
+    ({"gpu": "Mid", "vram_gb": 8.0, "ram_gb": 16, "gpu_runtime": True}, "best", "maybe"),
+    ({"gpu": "Small", "vram_gb": 2.0, "ram_gb": 16, "gpu_runtime": True}, "fast", "no"),
+    ({"gpu": None, "vram_gb": 0.0, "ram_gb": 8, "gpu_runtime": True}, "fast", "no"),
+    ({"gpu": None, "vram_gb": 0.0, "ram_gb": 64, "gpu_runtime": False}, "fast", "maybe"),
+    ({"gpu": None, "vram_gb": 0.0, "ram_gb": 8, "gpu_runtime": False}, "fast", "no"),
+])
+def test_advice_for_different_computers(hw, recommend, best):
+    a = engine.advice(hw)
+    assert (a["recommend"], a["best"]) == (recommend, best) and a["why"].endswith(".")
+    assert engine.advice(hw, best_ran=True)["recommend"] == "best"  # it has worked here: that settles it
+    assert engine.advice(hw, best_ran=True, best_failed=True)["recommend"] == "fast"
+
+
+def test_this_computer_can_be_examined():
+    hw = engine.hardware()
+    assert set(hw) == {"gpu", "vram_gb", "ram_gb", "gpu_runtime"} and hw["ram_gb"] > 0.5
+    assert hw["gpu"] is None or isinstance(hw["gpu"], str)

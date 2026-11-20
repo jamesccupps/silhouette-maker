@@ -62,6 +62,13 @@ your Desktop.
 and uses **Fast**, which runs on any CPU in about a second and is rougher
 around hair.
 
+The app looks at the computer when it starts (graphics card, its memory, the
+PC's memory) and says under **Add photos…** which method suits it. When you add
+photos it asks **Best or Fast** before any work starts, showing its
+recommendation and how long the batch will take, timed from real cut-outs on
+your computer. Tick "Use this from now on" to stop being asked; **Cut-out
+method** on the left changes it back.
+
 While it is cutting out, the *Best* model uses about 10 GB of graphics memory.
 It is let go 90 seconds after the last cut-out, so the app is light the rest of
 the time; the next photo after a pause takes about 10 seconds longer.

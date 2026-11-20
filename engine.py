@@ -8,6 +8,8 @@ from __future__ import annotations
 import gc
 import logging
 import os
+import subprocess
+import sys
 import threading
 from functools import lru_cache
 from pathlib import Path
@@ -828,3 +830,117 @@ def png_cutout(result: dict, settings: dict, opts=None) -> Image.Image:
     img.paste(Image.new("RGBA", alpha.size, (0, 0, 0, 255)), (round(lay["ox"] * dpi), round(lay["oy"] * dpi)), alpha)
     img.info["dpi"] = (dpi, dpi)
     return img
+
+
+# ---- what this computer can do ---------------------------------------------
+BEST_NEEDS_GB = 10.0  # graphics memory the best model was measured to use while cutting out
+
+
+def _windows_gpus() -> list[tuple[str, float]]:
+    """[(name, dedicated memory in GB)] of the graphics cards in this PC."""
+    import winreg
+
+    try:  # the cards that are present now (the registry also remembers removed ones)
+        present = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", "(Get-CimInstance Win32_VideoController).Name"],
+            capture_output=True, text=True, timeout=10, creationflags=0x08000000).stdout.split("\n")
+        present = {p.strip() for p in present if p.strip()}
+    except Exception:
+        present = set()
+    found = {}
+    base = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base) as cls:
+            for i in range(64):
+                try:
+                    sub = winreg.EnumKey(cls, i)
+                except OSError:
+                    break
+                try:
+                    with winreg.OpenKey(cls, sub) as card:
+                        name = winreg.QueryValueEx(card, "DriverDesc")[0]
+                        try:
+                            mem = winreg.QueryValueEx(card, "HardwareInformation.qwMemorySize")[0]
+                        except OSError:
+                            mem = winreg.QueryValueEx(card, "HardwareInformation.MemorySize")[0]
+                        if isinstance(mem, bytes):
+                            mem = int.from_bytes(mem, "little")
+                        if not present or name in present:
+                            found[name] = max(found.get(name, 0.0), mem / 1024**3)
+                except OSError:
+                    continue
+    except OSError:
+        pass
+    return list(found.items()) or [(n, 0.0) for n in present]
+
+
+def _ram_gb() -> float:
+    try:
+        if sys.platform == "win32":
+            import ctypes
+
+            class Mem(ctypes.Structure):
+                _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong)] + [
+                    (n, ctypes.c_ulonglong) for n in ("total", "avail", "tp", "ap", "tv", "av", "aev")]
+
+            m = Mem()
+            m.length = ctypes.sizeof(m)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m))
+            return m.total / 1024**3
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1024**3
+    except Exception:
+        return 0.0
+
+
+@lru_cache(maxsize=1)
+def hardware() -> dict:
+    """{"gpu": name or None, "vram_gb", "ram_gb", "gpu_runtime": the cut-out
+    models can use the graphics card here}. Looked up once."""
+    gpus = []
+    try:
+        if sys.platform == "win32":
+            gpus = _windows_gpus()
+        else:
+            out = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+                                 capture_output=True, text=True, timeout=10).stdout
+            gpus = [(n.strip(), float(m) / 1024) for n, m in (line.split(",") for line in out.splitlines() if "," in line)]
+    except Exception:
+        pass
+    name, vram = max(gpus, key=lambda g: g[1], default=(None, 0.0))
+    try:
+        import onnxruntime
+
+        providers = onnxruntime.get_available_providers()
+    except Exception:
+        providers = []
+    return {"gpu": name, "vram_gb": round(vram, 1), "ram_gb": round(_ram_gb(), 1),
+            "gpu_runtime": any(p in providers for p in ("DmlExecutionProvider", "CUDAExecutionProvider"))}
+
+
+def advice(hw: dict, best_ran: bool = False, best_failed: bool = False) -> dict:
+    """Which method suits this computer: {"recommend": best | fast,
+    "best": yes | maybe | no (can the best method run here), "why": one sentence}."""
+    gpu, vram = hw.get("gpu"), hw.get("vram_gb") or 0.0
+    card = f"the {gpu} ({vram:g} GB)" if gpu and vram else (f"the {gpu}" if gpu else "this computer")
+    if best_ran and not best_failed:
+        return {"recommend": "best", "best": "yes", "why": f"Best is recommended: it has run on {card}."}
+    if best_failed:
+        return {"recommend": "fast", "best": "no",
+                "why": "Fast is recommended: Best could not run on this computer the last time it was tried."}
+    if hw.get("gpu_runtime") and vram >= BEST_NEEDS_GB:
+        return {"recommend": "best", "best": "yes",
+                "why": f"Best is recommended: {card} has enough graphics memory for it (it uses about {BEST_NEEDS_GB:g} GB)."}
+    if hw.get("gpu_runtime") and vram >= 6:
+        return {"recommend": "best", "best": "maybe",
+                "why": f"Best is worth trying: it likes about {BEST_NEEDS_GB:g} GB of graphics memory and {card} has less, "
+                       "so it may be slow. If it cannot run, the app switches to Fast and tells you."}
+    if hw.get("gpu_runtime"):
+        why = (f"{card} has too little graphics memory for Best (it uses about {BEST_NEEDS_GB:g} GB)" if gpu
+               else "no graphics card was found")
+        return {"recommend": "fast", "best": "no", "why": f"Fast is recommended: {why}."}
+    if (hw.get("ram_gb") or 0) >= 32:
+        return {"recommend": "fast", "best": "maybe",
+                "why": "Fast is recommended: here Best would run on the processor, which takes minutes a photo "
+                       "and about 16 GB of free memory."}
+    return {"recommend": "fast", "best": "no",
+            "why": "Fast is recommended: Best needs a graphics card or a lot of memory, and this computer has neither."}

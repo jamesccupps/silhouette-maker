@@ -193,10 +193,35 @@ def _chosen():
     return out
 
 
+_speed_lock = threading.Lock()
+
+
+def _speed() -> dict:
+    """How the cut-outs have gone on this computer: {"best": [seconds], "fast": [seconds], "best_failed": bool}."""
+    try:
+        got = json.loads((DATA / "speed.json").read_text(encoding="utf-8"))
+        return got if isinstance(got, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _note_speed(kind: str, seconds: float, best_failed) -> None:
+    with _speed_lock:
+        sp = _speed()
+        sp[kind] = (sp.get(kind) or [])[-4:] + [round(seconds, 2)]
+        if best_failed is not None:
+            sp["best_failed"] = bool(best_failed)
+        DATA.mkdir(parents=True, exist_ok=True)
+        (DATA / "speed.json").write_text(json.dumps(sp), encoding="utf-8")
+
+
 def _cut_out(img, quality: str):
     """(mask, note). The note says so when the best model could not run here."""
+    started = time.perf_counter()
     mask, used = engine.segment(img, quality)
-    fell_back = quality != "fast" and used == engine.MODELS["fast"]
+    kind = "fast" if used == engine.MODELS["fast"] else "best"
+    fell_back = quality != "fast" and kind == "fast"
+    _note_speed(kind, time.perf_counter() - started, fell_back if quality != "fast" else None)
     return mask, ("The best cut-out model could not run on this computer, so the fast one was used."
                   if fell_back else "")
 
@@ -505,6 +530,17 @@ def forget_photo(item_id):
     return jsonify(_public(d, meta))
 
 
+@app.get("/api/hardware")
+def hardware():
+    """What this computer has, which cut-out method suits it, and how long
+    each has really taken here (the quickest of the last few; the first after a
+    pause includes loading the model)."""
+    hw, sp = engine.hardware(), _speed()
+    secs = {k: (min(sp[k]) if sp.get(k) else None) for k in ("best", "fast")}
+    return jsonify({**hw, **engine.advice(hw, best_ran=bool(sp.get("best")), best_failed=bool(sp.get("best_failed"))),
+                    "secs": secs})
+
+
 @app.get("/api/fonts")
 def list_fonts():
     """Every font on this computer that can letter a name, and what the
@@ -650,6 +686,7 @@ if __name__ == "__main__":
     DATA.mkdir(exist_ok=True)
     if "--no-browser" not in sys.argv:
         threading.Timer(1.0, lambda: webbrowser.open(f"http://127.0.0.1:{PORT}/")).start()
+    threading.Thread(target=engine.hardware, daemon=True).start()  # and at the graphics card
     threading.Thread(target=engine.fonts, daemon=True).start()  # look through the fonts while the page opens
     print(f"Silhouette Maker is running at http://127.0.0.1:{PORT}/  (close this window to stop)")
     app.run(host="127.0.0.1", port=PORT, threaded=True)
