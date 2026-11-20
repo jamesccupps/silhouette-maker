@@ -31,13 +31,15 @@ ornament.
 - **Made for cutting**: smoothing, and a "thinnest detail kept" setting in
   millimetres at the finished size, so hair wisps too thin to cut and weed are
   dropped.
-- **Sized in inches**, with a preview on an ornament of the size you set.
+- **Sized in inches**, with an exact preview on your ornament: circle, oval,
+  square, rectangle, hexagon, heart or star, in the colours you are using.
 - **Gallery**: search, mark finished, and download one SVG per child, a zip of
   all, or everyone packed onto mat-sized sheets.
-- **Files for Cricut Design Space**: SVG at true size, optional box or ornament
-  circle as its own layer, and PNG.
-- **Names**: the child's name, and a second line such as the year, under the
-  silhouette as its own layer.
+- **Files for Cricut Design Space**: SVG at true size, optionally with a box or
+  the ornament's shape as its own layer, and PNG.
+- **Lettering**: the child's name and a second line such as the year, straight
+  under the silhouette or curved along the edge. Long names wrap and shrink to
+  stay on the ornament.
 - **Proof sheet**: print everyone at real size on plain paper before cutting.
 - **Privacy tools**: delete the original photos once you are done and keep only
   the silhouettes; back up and restore everything as one file.
@@ -79,6 +81,9 @@ otherwise the app falls back to *Fast*.
 
 ## Use
 
+Hold the mouse over any button or setting for a short explanation, and use
+**Help** (bottom left) for the steps and the keyboard shortcuts.
+
 1. Drop photos on the page or use **Add photos…**. Try the ones in `samples/`
    first. Each is cut out and lands in the **gallery**. Everything saves as you
    work; there is no Save button.
@@ -100,8 +105,8 @@ otherwise the app falls back to *Fast*.
    - **Smoothing** rounds the outline; **Thinnest detail kept** drops what is
      too thin to cut.
    - The orange line is exactly what will be cut.
-4. Set **Shape height** and the ornament size, tick **Finished**. **Use this
-   height for everyone** gives every photo the same height, so the ornaments
+4. Set the **Silhouette height** and the ornament, tick **Finished**. **Same for
+   everyone** gives every child the same silhouette height, so the ornaments
    match; photos added later get it too.
 5. **Download SVG for Cricut**. From the gallery, **Download all SVGs** gives a
    zip and **Sheet of all** packs the children onto sheets for the mat chosen
@@ -109,17 +114,28 @@ otherwise the app falls back to *Fast*.
    may shrink a file taller than 11.5 in, so check the size after uploading a
    12 × 24 sheet.
 
-**Around the shape** adds a box or the ornament circle to the files, with
-**Space** for a margin. They arrive in Design Space as their own layer: cut
-them, use them as a size guide, or delete them. Blank space on its own only
-shows in the PNG, because Design Space ignores empty space in an SVG.
+### The ornament and lettering
 
-**Text under it** adds the child's name, or the name and a line below (the
-year, a class name), in one of four lettering styles. It is written as outlines,
-not as text, because Design Space ignores text in an uploaded SVG; it arrives as
-its own layer, so you can cut it, draw it with a pen, or delete it. The preview
-in the app is approximate; the files use the real letter shapes. Small cut
-letters are hard to weed, so try the proof sheet first.
+Under **Ornament and size**, choose the ornament's shape, size and colour, and
+the colour of your vinyl. The picture there is drawn by the same code that
+writes the files, so it shows exactly what you will get, and it says so when the
+silhouette is too big for the ornament.
+
+Under **Lettering**, tick **Put the name on it** and, if you like, type a
+**Second line** (the year, a class name). The letters can sit straight under the
+silhouette or, on a round ornament, curve along the bottom edge. A long name
+wraps onto two lines and then shrinks, so it never runs off the ornament. Photos
+straight from a camera (IMG_2041…) come in without a name; type one in the
+**Name** box.
+
+The letters are written into the SVG as outlines, not as text, because Design
+Space ignores text in an uploaded SVG. They arrive as their own layer, so you
+can cut them, draw them with a pen, or delete them. Small cut letters are hard
+to weed, so try the proof sheet first.
+
+**Behind the silhouette** (under **Files**) adds a plain box or the ornament's
+own shape to the files as a separate layer: a size guide you can delete, or a
+backing you can cut.
 
 ### Before you cut: the proof sheet
 

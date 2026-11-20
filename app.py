@@ -23,7 +23,7 @@ from PIL import Image
 
 import engine
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 ROOT = Path(__file__).resolve().parent
 
 
@@ -206,15 +206,31 @@ def _safe_name(name: str) -> str:
 
 
 def _export_opts() -> dict:
+    """What goes around and under the shape, from the page's query string."""
     a = request.args
-    border = a.get("border", "none")
-    return {"border": border if border in ("none", "rect", "circle") else "none",
+    border = {"circle": "ornament"}.get(a.get("border"), a.get("border"))  # "circle": older links
+    return {"border": border if border in ("none", "rect", "ornament") else "none",
             "space": _num(a.get("space"), 0.0, 6.0, 0.0),
+            "shape": a.get("shape") if a.get("shape") in engine.ORNAMENTS else "circle",
             "orn": _num(a.get("orn"), 0.5, 24.0, 3.0),
-            "text": a.get("text") if a.get("text") in ("name", "both") else "none",
-            "line2": (a.get("line2") or "")[:30],
+            "orn_h": _num(a.get("orn_h"), 0.0, 24.0, 0.0),
+            "name_on": a.get("name_on") == "1" or a.get("text") in ("name", "both"),
+            "line2": (a.get("line2") or "")[:40],
+            "place": "arc" if a.get("place") == "arc" else "below",
             "font": a.get("font") if a.get("font") in engine.FONTS else "serif",
-            "tsize": _num(a.get("tsize"), 0.1, 2.0, 0.3)}
+            "tsize": _num(a.get("tsize"), 0.08, 2.0, 0.3)}
+
+
+def _colour(value, default: str) -> str:
+    return value if isinstance(value, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", value) else default
+
+
+def _name_from_file(filename: str) -> str:
+    """A photo called Ava.jpg is Ava. A camera's own file name (IMG_2041,
+    PXL_20261119_190204) is not a name: leave it blank for the user to fill in."""
+    stem = Path(filename or "").stem.strip()[:60]
+    letters = re.sub(r"(?i)^(img|pxl|dsc|dscn|dscf|mvimg|photo|image|picture|screenshot|scan|p|wp)(?=[\W_\d]|$)", "", stem)
+    return "" if not re.search(r"[^\W\d_]", letters) else stem
 
 
 NO_PHOTO = "The photo was deleted, so it cannot be cut out again."
@@ -270,7 +286,7 @@ def add_item():
     Image.fromarray(mask).save(d / "start.png")  # what "reset" goes back to
     settings = dict(engine.DEFAULT_SETTINGS, cut=engine.default_cut(mask))
     settings["height_in"] = _num(request.form.get("height_in"), 0.25, 24.0, settings["height_in"])
-    name = Path(f.filename or "photo").stem[:60]
+    name = _name_from_file(f.filename)
     meta = {"name": name, "w": img.width, "h": img.height, "added": time.time(), "settings": settings}
     _save_meta(d, meta)
     return jsonify(dict(_public(d, meta), note=note))
@@ -507,26 +523,51 @@ figcaption{font-size:12px}
 """
 
 
+@app.get("/api/items/<item_id>/preview")
+def preview(item_id):
+    """The child on the ornament, exactly as the files will have it."""
+    d = _dir(item_id)
+    meta = _meta(d)
+    a = request.args
+    name = a.get("name", meta["name"])[:60]
+    fg, bg = _colour(a.get("fg"), "#111111"), _colour(a.get("bg"), engine.BORDER_FILL)
+    res = _result(d, meta) if _outline_json(d, meta)["bbox"] else None
+    o = _export_opts()
+    on = engine.on_ornament(name, res, meta["settings"], o, fill=fg,
+                            orn_attrs=f'fill="{bg}" stroke="#00000033" stroke-width="1"')
+    u, pad = engine.UNITS_PER_INCH, 0.12
+    ow, oh = engine.orn_size(engine._opts(o))
+    hole = ""
+    if o["shape"] not in ("heart", "star"):  # where the ribbon goes
+        hole = (f'<circle cx="{on["w"] / 2 * u:.2f}" cy="{(on["h"] / 2 - oh / 2 + 0.06 * oh) * u:.2f}" '
+                f'r="{0.02 * ow * u:.2f}" fill="#00000066"/>')
+    return jsonify({"viewBox": f"{-pad * u:.2f} {-pad * u:.2f} {(on['w'] + 2 * pad) * u:.2f} {(on['h'] + 2 * pad) * u:.2f}",
+                    "html": on["body"] + hole, "fits": on["fits"]})
+
+
 @app.get("/proof")
 def proof_sheet():
     """A page to print on plain paper: every shape at its real size, on its ornament."""
     items = _chosen()
     if not items:
         abort(409)
-    o = dict(_export_opts(), border="circle")  # centred on the ornament, as it will be stuck on
+    o = _export_opts()
     u, figs = engine.UNITS_PER_INCH, []
+    dashed = 'fill="none" stroke="#888" stroke-width="0.75" stroke-dasharray="4 3"'
     for name, res, settings in items:
-        side = engine.layout(res, settings, o, name)[0]
-        body = (f'<circle cx="{side / 2 * u:.2f}" cy="{side / 2 * u:.2f}" r="{o["orn"] / 2 * u:.2f}" fill="none" '
-                f'stroke="#888" stroke-width="0.75" stroke-dasharray="4 3"/>\n'
-                + engine.piece_svg(name, res, settings, o, 0.0, 0.0, border=False))
-        figs.append(f'<figure><svg xmlns="http://www.w3.org/2000/svg" width="{side:.4f}in" height="{side:.4f}in" '
-                    f'viewBox="0 0 {side * u:.2f} {side * u:.2f}">{body}</svg>'
-                    f'<figcaption>{html.escape(name)} &middot; {engine.size_in(res, settings)[1]:.2f} in tall</figcaption></figure>')
+        on = engine.on_ornament(name, res, settings, o, orn_attrs=dashed)
+        tall = engine.size_in(res, settings)[1]
+        figs.append(f'<figure><svg xmlns="http://www.w3.org/2000/svg" width="{on["w"]:.4f}in" height="{on["h"]:.4f}in" '
+                    f'viewBox="0 0 {on["w"] * u:.2f} {on["h"] * u:.2f}">{on["body"]}</svg>'
+                    f'<figcaption>{html.escape(name) or "Unnamed"} &middot; {tall:.2f} in tall'
+                    f'{"" if on["fits"] else " &middot; <b>does not fit</b>"}</figcaption></figure>')
+    ow, oh = engine.orn_size(engine._opts(o))
+    kind = engine.ORNAMENTS[o["shape"]].lower()
+    size = f"{ow:g} in" if ow == oh else f"{ow:g} × {oh:g} in"
     page = (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Silhouette proof sheet</title>'
             f'<style>{PROOF_CSS}</style></head><body><header><h1>Proof sheet</h1><button id="print">Print</button>'
             f'<div class="rule"></div><div class="note">Print at 100% (&ldquo;Actual size&rdquo;, not &ldquo;Fit&rdquo;). '
-            f'The black bar should measure exactly 2 inches. Dashed circles are the {o["orn"]:g} in ornament.</div></header>'
+            f'The black bar should measure exactly 2 inches. The dashed outline is the {size} {kind} ornament.</div></header>'
             f'<main>{"".join(figs)}</main><script src="/static/proof.js"></script></body></html>')
     return page
 

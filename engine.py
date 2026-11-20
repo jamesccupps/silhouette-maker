@@ -433,91 +433,299 @@ def text_d(text: str, key: str, size: float, cx: float, baseline: float) -> str:
     return pen.getCommands()
 
 
-# ---- pieces ----------------------------------------------------------------
+def text_arc_d(text: str, key: str, size: float, cx: float, cy: float, radius: float) -> str:
+    """Text as outlines along the bottom of a circle: centred at the bottom,
+    reading left to right, tops of the letters towards the centre."""
+    from fontTools.pens.svgPathPen import SVGPathPen
+    from fontTools.pens.transformPen import TransformPen
+
+    font = _font(key)
+    glyphs, hmtx = font.getGlyphSet(), font["hmtx"]
+    run, w, upm = _run(text, key)
+    k = size / upm
+    pen = SVGPathPen(glyphs, ntos=lambda v: f"{v:.2f}")
+    for g, x in run:
+        adv = hmtx[g][0]
+        th = (x + adv / 2 - w / 2) * k / radius  # angle of this letter's middle, 0 = bottom
+        c, sn = np.cos(th), np.sin(th)
+        px, py = cx + radius * sn, cy + radius * c
+        glyphs[g].draw(TransformPen(pen, (k * c, -k * sn, -k * sn, -k * c,
+                                          px - k * adv / 2 * c, py + k * adv / 2 * sn)))
+    return pen.getCommands()
+
+
+# ---- ornaments ---------------------------------------------------------------
+ORNAMENTS = {"circle": "Circle", "oval": "Oval", "square": "Square", "rect": "Rectangle",
+             "hexagon": "Hexagon", "heart": "Heart", "star": "Star"}
+
+def ornament_points(shape: str, w: float, h: float, n: int = 200) -> np.ndarray:
+    """Outline of an ornament w wide and h tall, centred on (0, 0)."""
+    if shape in ("square", "rect"):
+        pts = np.array([[-1, -1], [1, -1], [1, 1], [-1, 1]], dtype=np.float64)
+    elif shape == "hexagon":
+        a = np.deg2rad(np.arange(6) * 60 + 30)
+        pts = np.column_stack([np.cos(a), np.sin(a)])
+    elif shape == "star":
+        a = np.deg2rad(np.arange(10) * 36 - 90)
+        r = np.where(np.arange(10) % 2 == 0, 1.0, 0.5)
+        pts = np.column_stack([r * np.cos(a), r * np.sin(a)])
+    elif shape == "heart":
+        t = np.linspace(0, 2 * np.pi, n, endpoint=False)
+        pts = np.column_stack([16 * np.sin(t) ** 3,
+                               -(13 * np.cos(t) - 5 * np.cos(2 * t) - 2 * np.cos(3 * t) - np.cos(4 * t))])
+    else:  # circle, oval
+        t = np.linspace(0, 2 * np.pi, n, endpoint=False)
+        pts = np.column_stack([np.cos(t), np.sin(t)])
+    lo, hi = pts.min(axis=0), pts.max(axis=0)
+    return (pts - (lo + hi) / 2) / (hi - lo) * np.array([w, h])  # fill the w x h box exactly
+
+
+def ornament_svg(shape: str, w: float, h: float, cx: float, cy: float, u: float, attrs: str) -> str:
+    """The ornament as one SVG element, centre (cx, cy), all in inches times u."""
+    if shape in ("circle", "oval"):
+        return f'<ellipse cx="{cx * u:.2f}" cy="{cy * u:.2f}" rx="{w / 2 * u:.2f}" ry="{h / 2 * u:.2f}" {attrs}/>'
+    if shape in ("square", "rect"):
+        return (f'<rect x="{(cx - w / 2) * u:.2f}" y="{(cy - h / 2) * u:.2f}" width="{w * u:.2f}" '
+                f'height="{h * u:.2f}" {attrs}/>')
+    pts = " ".join(f"{(cx + x) * u:.2f},{(cy + y) * u:.2f}" for x, y in ornament_points(shape, w, h))
+    return f'<polygon points="{pts}" {attrs}/>'
+
+
+@lru_cache(maxsize=64)
+def _poly(shape: str, w: float, h: float) -> np.ndarray:
+    return ornament_points(shape, w, h, 240).astype(np.float32)
+
+
+def _room(shape: str, w: float, h: float, y: float) -> float:
+    """Usable width inside the ornament at height y (0 = its middle), for
+    something centred left to right. 0 where the middle is outside the shape
+    (above the dip of a heart)."""
+    if shape in ("circle", "oval"):
+        t = 1 - (y / (h / 2)) ** 2
+        return w * (t**0.5 if t > 0 else 0.0)
+    pts = _poly(shape, w, h)
+    x0, y0 = pts[:, 0], pts[:, 1]
+    x1, y1 = np.roll(x0, -1), np.roll(y0, -1)
+    hit = (y0 - y) * (y1 - y) < 0  # edges this height passes through
+    xs = x0[hit] + (y - y0[hit]) * (x1[hit] - x0[hit]) / (y1[hit] - y0[hit])
+    right, left = xs[xs > 0], xs[xs <= 0]
+    if len(right) % 2 == 0 or not len(left):  # an even count to the right: the middle is outside
+        return 0.0
+    return 2 * float(min(right.min(), -left.max()))
+
+
+def _inside(shape: str, w: float, h: float, x: float, y: float) -> bool:
+    if shape in ("circle", "oval"):
+        return (x / (w / 2)) ** 2 + (y / (h / 2)) ** 2 <= 1.03
+    return cv2.pointPolygonTest(_poly(shape, w, h).reshape(-1, 1, 2), (float(x), float(y)), True) >= -0.015 * w
+
+
+# ---- pieces ------------------------------------------------------------------
 def _opts(opts) -> dict:
-    """border: none | rect | circle; space: blank inches around; orn: ornament
-    diameter (for the circle); text: none | name | both (name + line2);
-    font: a key of FONTS; tsize: letter size in inches."""
-    return {"border": "none", "space": 0.0, "orn": 3.0,
-            "text": "none", "line2": "", "font": "serif", "tsize": 0.3, **(opts or {})}
+    """What goes around and under the shape in a file.
+
+    border: none | rect (a box) | ornament (the ornament's own shape)
+    space: blank inches around, when there is no ornament border
+    shape, orn, orn_h: the ornament (a key of ORNAMENTS, width, height in inches;
+        the height only counts for ovals and rectangles)
+    name_on, line2: letter the child's name and/or a second line
+    place: below (straight, under the shape) | arc (curved along the bottom of a circle)
+    font, tsize: a key of FONTS, letter size in inches (shrunk when it would not fit)
+    """
+    o = {"border": "none", "space": 0.0, "shape": "circle", "orn": 3.0, "orn_h": 0.0,
+         "name_on": False, "line2": "", "place": "below", "font": "serif", "tsize": 0.3, **(opts or {})}
+    if o["border"] == "circle":  # the name older links use
+        o["border"] = "ornament"
+    if o["shape"] not in ORNAMENTS:
+        o["shape"] = "circle"
+    return o
 
 
-def _lines(name: str, o: dict) -> list[tuple[str, float]]:
-    """[(text, letter size in inches)] to put under the shape."""
-    if o["text"] not in ("name", "both") or not font_file(o["font"]):
+def orn_size(o: dict) -> tuple[float, float]:
+    w = float(o["orn"])
+    h = float(o["orn_h"]) if o["shape"] in ("oval", "rect") and float(o["orn_h"]) > 0 else w
+    return w, h
+
+
+def _shape_points(result: dict, settings: dict) -> np.ndarray:
+    """Points along the cut line, in inches from the shape's top-left corner."""
+    s = {**DEFAULT_SETTINGS, **settings}
+    x0, y0, x1, y1 = result["bbox"]
+    k = float(s["height_in"]) / (y1 - y0)
+    pts = np.vstack([np.vstack([loop[0]] + [seg[2] for seg in loop[1:]]) for loop in result["loops"]])
+    xs = (x1 - pts[:, 0]) if s["flip"] else (pts[:, 0] - x0)
+    return np.column_stack([xs * k, (pts[:, 1] - y0) * k])
+
+
+def _wanted_lines(name: str, o: dict) -> list[list]:
+    """[[text, letter size]] the user asked for, before fitting."""
+    if not font_file(o["font"]):
         return []
     size, out = float(o["tsize"]), []
-    if name.strip():
-        out.append((name.strip(), size))
-    if o["text"] == "both" and str(o["line2"]).strip():
-        out.append((str(o["line2"]).strip(), size * 0.8))
+    if o["name_on"] and name.strip():
+        out.append([" ".join(name.split()), size])
+    if str(o["line2"]).strip():
+        out.append([" ".join(str(o["line2"]).split()), size * 0.8])
     return out
 
 
-def _layout(result: dict, settings: dict, opts, name: str):
-    """(width, height, shape_x, shape_y, [(text, size, centre_x, baseline_y)]) in inches."""
+def _wrap(text: str, key: str) -> list[str]:
+    """Split at the space that makes the two halves most alike in width."""
+    words = text.split(" ")
+    if len(words) < 2:
+        return [text]
+    best = min(range(1, len(words)), key=lambda i: abs(text_width_em(" ".join(words[:i]), key)
+                                                        - text_width_em(" ".join(words[i:]), key)))
+    return [" ".join(words[:best]), " ".join(words[best:])]
+
+
+def _layout(result: dict, settings: dict, opts, name: str, framed: bool = False) -> dict:
+    """Where everything in one piece goes, in inches from the piece's top-left.
+
+    {"w", "h", "ox", "oy" (the shape's top-left), "texts": [(text, size, centre_x, baseline_y)],
+     "arc": (text, size, centre_x, centre_y, radius) or None, "fits": everything is inside the ornament}
+
+    Lettering is always fitted to the ornament: a long name wraps onto two
+    lines, then shrinks, so it never runs off the edge."""
     o = _opts(opts)
     sw, sh = size_in(result, settings)
-    lines = _lines(name, o)
-    block = TEXT_GAP + sum(1.2 * size for _, size in lines) if lines else 0.0
-    cw = max([sw] + [text_width_em(t, o["font"]) * size for t, size in lines])
-    ch = sh + block
-    if o["border"] == "circle":
-        w = h = max(float(o["orn"]), cw, ch)
-        left, top = (w - cw) / 2, (h - ch) / 2
+    ow, oh = orn_size(o)
+    key = o["font"]
+    lines = _wanted_lines(name, o)
+    use_arc = bool(lines) and o["place"] == "arc" and o["shape"] == "circle"
+    framed = framed or o["border"] == "ornament" or use_arc
+    texts, arc, lift = [], None, 0.0  # everything below is relative to the ornament's centre first
+
+    if use_arc:
+        dot = " · " if _font(key).getBestCmap().get(0xB7) else " - "
+        text, size = dot.join(t for t, _ in lines), lines[0][1]
+        for _ in range(3):  # the radius depends on the size, so settle it
+            radius = ow / 2 - 0.12 - 0.26 * size
+            longest = radius * np.deg2rad(200)
+            width = text_width_em(text, key) * size
+            if width <= longest:
+                break
+            size = max(0.06, size * longest / width)
+        arc = (text, size, 0.0, 0.0, radius)
+        lift = min(0.45 * size + 0.04, max(0.0, (oh - sh) / 2))  # the shape moves up to clear the letters
+        top = -sh / 2 - lift
     else:
+        wrapped = False
+        for _ in range(6):  # sizes move the lines, which changes the room each one has
+            block = TEXT_GAP + sum(1.2 * size for _, size in lines) if lines else 0.0
+            top = -(sh + block) / 2
+            y, placed, again = top + sh + TEXT_GAP, [], False
+            for i, (t, size) in enumerate(lines):
+                # the narrower of the room at the top and at the bottom of the letters
+                room = max(0.2 * ow, 0.92 * min(_room(o["shape"], ow, oh, y + 0.1 * size),
+                                                _room(o["shape"], ow, oh, y + 0.95 * size)))
+                width = text_width_em(t, key) * size
+                if width > room and not wrapped and i == 0 and o["name_on"] and name.strip() and " " in t:
+                    lines[0:1] = [[part, size] for part in _wrap(t, key)]  # a long name: two lines
+                    wrapped = again = True
+                    break
+                if width > room:
+                    lines[i][1] = size = max(0.06, size * room / width)
+                    if wrapped and i < 2:  # the two halves of a name stay the same size
+                        lines[0][1] = lines[1][1] = size = min(lines[0][1], lines[1][1])
+                    again = True
+                placed.append((t, size, 0.0, y + 0.78 * size))
+                y += 1.2 * size
+            if not again:
+                break
+        texts = placed
+
+    corners = [(-sw / 2, top), (sw / 2, top), (-sw / 2, top + sh), (sw / 2, top + sh)]
+    inked = [(x - sw / 2, y + top) for x, y in _shape_points(result, settings)]  # the outline itself, not its box
+    for t, size, _, base in texts:
+        half = text_width_em(t, key) * size / 2
+        box = [(-half, base - 0.7 * size), (half, base - 0.7 * size), (-half, base + 0.2 * size), (half, base + 0.2 * size)]
+        corners += box
+        inked += box
+    fits = all(_inside(o["shape"], ow, oh, x, y) for x, y in inked)
+    left = min(x for x, _ in corners)
+    right = max(x for x, _ in corners)
+    bottom = max(y for _, y in corners)
+
+    if framed:  # the piece is the ornament (or bigger, if things stick out)
+        w, h = max(ow, right - left), max(oh, 2 * max(-top, bottom))
+        cx, cy = w / 2, h / 2
+    else:  # the piece hugs what is in it
         sp = max(0.0, float(o["space"]))
-        w, h, left, top = cw + 2 * sp, ch + 2 * sp, sp, sp
-    ox, oy = left + (cw - sw) / 2, top
-    texts, y = [], oy + sh + TEXT_GAP
-    for t, size in lines:
-        texts.append((t, size, left + cw / 2, y + 0.78 * size))
-        y += 1.2 * size
-    return w, h, ox, oy, texts
+        w, h = (right - left) + 2 * sp, (bottom - top) + 2 * sp
+        cx, cy = sp - left, sp - top
+    return {"w": w, "h": h, "ox": cx - sw / 2, "oy": cy + top, "cx": cx, "cy": cy, "fits": fits,
+            "texts": [(t, size, cx + x, cy + base) for t, size, x, base in texts],
+            "arc": (arc[0], arc[1], cx, cy, arc[4]) if arc else None, "o": o}
 
 
 def layout(result: dict, settings: dict, opts=None, name: str = ""):
     """(width, height, shape_x, shape_y) of one exported piece, in inches."""
-    return _layout(result, settings, opts, name)[:4]
+    lay = _layout(result, settings, opts, name)
+    return lay["w"], lay["h"], lay["ox"], lay["oy"]
 
 
-def piece_svg(name: str, result: dict, settings: dict, opts, x: float, y: float, border: bool = True) -> str:
-    """One child at (x, y) inches: the border (its own layer, behind), the
-    shape, then any lettering (its own layer too)."""
-    o, u = _opts(opts), UNITS_PER_INCH
-    w, h, ox, oy, texts = _layout(result, settings, o, name)
+def _piece(name: str, result: dict, settings: dict, lay: dict, x: float, y: float,
+           border: bool = True, fill: str = "#000000", text_fill: str = TEXT_FILL) -> str:
+    """One laid-out child at (x, y) inches: the border (its own layer, behind),
+    the shape, then any lettering (its own layer too)."""
+    o, u = lay["o"], UNITS_PER_INCH
     out = ""
-    if border and o["border"] == "circle":
-        out = (f'<circle cx="{(x + w / 2) * u:.2f}" cy="{(y + h / 2) * u:.2f}" r="{w / 2 * u:.2f}" '
-               f'fill="{BORDER_FILL}"><title>{_xml(name)} border</title></circle>\n')
+    if border and o["border"] == "ornament":
+        out = ornament_svg(o["shape"], *orn_size(o), x + lay["cx"], y + lay["cy"], u, f'fill="{BORDER_FILL}"')
+        out = out[:-2] + f"><title>{_xml(name)} ornament</title></{out[1:out.index(' ')]}>\n"
     elif border and o["border"] == "rect":
-        out = (f'<rect x="{x * u:.2f}" y="{y * u:.2f}" width="{w * u:.2f}" height="{h * u:.2f}" '
+        out = (f'<rect x="{x * u:.2f}" y="{y * u:.2f}" width="{lay["w"] * u:.2f}" height="{lay["h"] * u:.2f}" '
                f'fill="{BORDER_FILL}"><title>{_xml(name)} border</title></rect>\n')
-    d = placed_d(result, settings, x + ox, y + oy)
-    out += f'<path fill="#000000" fill-rule="evenodd" d="{d}"><title>{_xml(name)}</title></path>\n'
-    if texts:
-        td = "".join(text_d(t, o["font"], size * u, (x + cx) * u, (y + base) * u) for t, size, cx, base in texts)
-        out += f'<path fill="{TEXT_FILL}" d="{td}"><title>{_xml(name)} lettering</title></path>\n'
+    d = placed_d(result, settings, x + lay["ox"], y + lay["oy"])
+    out += f'<path fill="{fill}" fill-rule="evenodd" d="{d}"><title>{_xml(name)}</title></path>\n'
+    td = "".join(text_d(t, o["font"], size * u, (x + cx) * u, (y + base) * u) for t, size, cx, base in lay["texts"])
+    if lay["arc"]:
+        t, size, cx, cy, radius = lay["arc"]
+        td += text_arc_d(t, o["font"], size * u, (x + cx) * u, (y + cy) * u, radius * u)
+    if td:
+        out += f'<path fill="{text_fill}" d="{td}"><title>{_xml(name)} lettering</title></path>\n'
     return out
 
 
+def piece_svg(name: str, result: dict, settings: dict, opts, x: float, y: float) -> str:
+    return _piece(name, result, settings, _layout(result, settings, opts, name), x, y)
+
+
+def on_ornament(name: str, result, settings: dict, opts, fill: str = "#000000",
+                orn_attrs: str = f'fill="{BORDER_FILL}"') -> dict:
+    """The piece as it will sit on the ornament, for the preview and the proof
+    sheet: {"w", "h" (inches), "body" (SVG, 72 per inch), "fits"}. result may
+    be None (nothing to cut yet): then just the ornament."""
+    o, u = _opts(opts), UNITS_PER_INCH
+    ow, oh = orn_size(o)
+    if not result or not result.get("loops"):
+        return {"w": ow, "h": oh, "fits": True,
+                "body": ornament_svg(o["shape"], ow, oh, ow / 2, oh / 2, u, orn_attrs) + "\n"}
+    lay = _layout(result, settings, o, name, framed=True)
+    body = ornament_svg(o["shape"], ow, oh, lay["cx"], lay["cy"], u, orn_attrs) + "\n"
+    return {"w": lay["w"], "h": lay["h"], "fits": lay["fits"],
+            "body": body + _piece(name, result, settings, lay, 0.0, 0.0, border=False, fill=fill, text_fill=fill)}
+
+
 def svg_single(result: dict, settings: dict, name: str = "", opts=None) -> str:
-    w, h, _, _ = layout(result, settings, opts, name)
-    return _svg(w, h, piece_svg(name, result, settings, opts, 0.0, 0.0))
+    lay = _layout(result, settings, opts, name)
+    return _svg(lay["w"], lay["h"], _piece(name, result, settings, lay, 0.0, 0.0))
 
 
 def svg_sheets(items: list[tuple[str, dict, dict]], sheet_w=11.5, sheet_h=11.5,
                gap=0.2, opts=None) -> list[str]:
     """Pack (name, result, settings) onto as many sheets as needed, in rows."""
+    laid = [(name, result, settings, _layout(result, settings, opts, name)) for name, result, settings in items]
     sheets, body, x, y, row_h = [], [], 0.0, 0.0, 0.0
-    for name, result, settings in sorted(items, key=lambda it: -layout(it[1], it[2], opts, it[0])[1]):
-        w, h, _, _ = layout(result, settings, opts, name)
+    for name, result, settings, lay in sorted(laid, key=lambda it: -it[3]["h"]):
+        w, h = lay["w"], lay["h"]
         if x > 0 and x + w > sheet_w:
             x, y, row_h = 0.0, y + row_h + gap, 0.0
         if y > 0 and y + h > sheet_h:
             sheets.append(_svg(sheet_w, sheet_h, "".join(body)))
             body, x, y, row_h = [], 0.0, 0.0, 0.0
-        body.append(piece_svg(name, result, settings, opts, x, y))
+        body.append(_piece(name, result, settings, lay, x, y))
         x, row_h = x + w + gap, max(row_h, h)
     if body:
         sheets.append(_svg(sheet_w, sheet_h, "".join(body)))
@@ -530,7 +738,7 @@ def png_cutout(result: dict, settings: dict, opts=None) -> Image.Image:
     from PIL import ImageDraw
 
     s = {**DEFAULT_SETTINGS, **settings}
-    o = dict(_opts(opts), text="none")
+    o = dict(_opts(opts), name_on=False, line2="")
     final = result["final"]
     tilt = float(s.get("tilt_deg") or 0.0)
     if tilt:
@@ -545,14 +753,15 @@ def png_cutout(result: dict, settings: dict, opts=None) -> Image.Image:
     if s["flip"]:
         crop = crop[:, ::-1]
     dpi = (y1 - y0) / float(s["height_in"])
-    w_in, h_in, ox, oy = layout(result, settings, o)
-    size = (max(1, round(w_in * dpi)), max(1, round(h_in * dpi)))
+    lay = _layout(result, settings, o, "")
+    size = (max(1, round(lay["w"] * dpi)), max(1, round(lay["h"] * dpi)))
     img = Image.new("RGBA", size, (0, 0, 0, 0))
-    if o["border"] in ("rect", "circle"):
-        draw = ImageDraw.Draw(img)
-        box = (0, 0, size[0] - 1, size[1] - 1)
-        (draw.ellipse if o["border"] == "circle" else draw.rectangle)(box, fill=BORDER_FILL)
+    if o["border"] == "rect":
+        ImageDraw.Draw(img).rectangle((0, 0, size[0] - 1, size[1] - 1), fill=BORDER_FILL)
+    elif o["border"] == "ornament":
+        pts = ornament_points(o["shape"], *orn_size(o)) + np.array([lay["cx"], lay["cy"]])
+        ImageDraw.Draw(img).polygon([(float(x) * dpi, float(y) * dpi) for x, y in pts], fill=BORDER_FILL)
     alpha = Image.fromarray(np.ascontiguousarray(crop))
-    img.paste(Image.new("RGBA", alpha.size, (0, 0, 0, 255)), (round(ox * dpi), round(oy * dpi)), alpha)
+    img.paste(Image.new("RGBA", alpha.size, (0, 0, 0, 255)), (round(lay["ox"] * dpi), round(lay["oy"] * dpi)), alpha)
     img.info["dpi"] = (dpi, dpi)
     return img

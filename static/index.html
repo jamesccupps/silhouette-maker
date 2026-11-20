@@ -9,7 +9,7 @@
 :root{--bg:#17191c;--panel:#1f2226;--panel2:#272b30;--line:#343941;--text:#e8eaed;--dim:#9aa3ad;--accent:#f0a23b;--accent-text:#1b1408;--danger:#e2675f}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
-body{background:var(--bg);color:var(--text);font:14px/1.4 "Segoe UI",system-ui,sans-serif;display:grid;grid-template-columns:230px 1fr 300px;overflow:hidden}
+body{background:var(--bg);color:var(--text);font:14px/1.4 "Segoe UI",system-ui,sans-serif;display:grid;grid-template-columns:230px 1fr 340px;overflow:hidden}
 button,input,select{font:inherit;color:inherit}
 button{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer}
 button:hover{border-color:#566070}
@@ -32,7 +32,7 @@ h1{font-size:16px;margin:0 0 2px}
 .kid svg{width:44px;height:44px;background:#f4efe6;border-radius:6px;flex:none}
 .kid span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #left footer{padding:10px 12px;border-top:1px solid var(--line);display:flex;gap:6px}
-#left footer button{flex:1}
+#left footer button{flex:1;padding:6px 4px;font-size:13px;white-space:nowrap}
 main{display:flex;flex-direction:column;min-width:0;min-height:0;position:relative}
 #bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 10px;background:var(--panel);border-bottom:1px solid var(--line)}
 #bar .sep{width:1px;height:22px;background:var(--line);margin:0 4px}
@@ -82,6 +82,28 @@ body.home #right{display:none}
 .h.cur{background:var(--panel2);border-color:var(--accent)}
 .h.undone{opacity:.45}
 .h small{color:var(--dim)}
+#right{padding:10px 12px;gap:8px}
+#hint{background:#000a;padding:3px 8px;border-radius:10px;text-shadow:none}
+#bar .cap{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.04em;margin-right:-2px}
+.sec{border:1px solid var(--line);border-radius:10px;background:#1b1e22}
+.sec>summary{cursor:pointer;padding:8px 10px;font-weight:600;list-style:none;display:flex;justify-content:space-between;align-items:center;user-select:none}
+.sec>summary::-webkit-details-marker{display:none}
+.sec>summary::after{content:"▾";color:var(--dim)}
+.sec:not([open])>summary::after{content:"▸"}
+.sec>.in{padding:2px 10px 12px;display:flex;flex-direction:column;gap:11px}
+.sec small.note{color:var(--dim);font-size:12px;line-height:1.35}
+input[type=color]{width:100%;height:32px;padding:2px;background:var(--bg);border:1px solid var(--line);border-radius:6px;cursor:pointer}
+#orn{aspect-ratio:auto;height:230px}
+#size.bad{color:#f0b35a}
+#tip{position:fixed;z-index:50;max-width:280px;background:#0d0f11;color:var(--text);border:1px solid #566070;border-radius:8px;padding:7px 10px;font-size:12.5px;line-height:1.4;box-shadow:0 6px 20px #000c;pointer-events:none}
+#help{position:fixed;inset:0;z-index:40;background:#000a;display:flex;align-items:center;justify-content:center;padding:20px}
+#help .sheet{background:var(--panel);border:1px solid var(--line);border-radius:14px;max-width:760px;max-height:100%;overflow:auto;padding:22px 26px;cursor:default}
+#help h2{margin:0 0 4px;font-size:20px}
+#help h3{margin:16px 0 6px;font-size:14px;color:var(--accent)}
+#help ol,#help ul{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:5px}
+#help .cols{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px}
+#help kbd{background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:0 5px;font:12px Consolas,monospace}
+#help .foot{display:flex;justify-content:space-between;align-items:center;margin-top:18px}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -89,40 +111,43 @@ body.home #right{display:none}
 <aside id="left">
   <header>
     <div><h1>Silhouette Maker</h1><div class="private">Photos stay on this computer.</div></div>
-    <button class="primary" id="addBtn">Add photos…</button>
+    <button class="primary" id="addBtn" data-tip="Choose one or more side-on photos. Each is cut out automatically. You can also drag photos onto this window.">Add photos…</button>
     <input type="file" id="file" accept="image/*,.heic,.heif" multiple hidden>
   </header>
   <div id="list"></div>
   <footer>
-    <button id="backupBtn" title="Save everything (photos, silhouettes, settings) as one zip file. It contains the photos, so keep it somewhere private.">Back up</button>
-    <button id="restoreBtn" title="Add the photos from a backup file. Photos already here are left alone.">Restore</button>
+    <button id="backupBtn" data-tip="Save everything (photos, silhouettes, settings) as one zip file. It contains the photos, so keep it somewhere private.">Back up</button>
+    <button id="restoreBtn" data-tip="Add the children from a backup file. Ones already here are left alone.">Restore</button>
+    <button id="helpBtn" data-tip="How to use the app, step by step, and the keyboard shortcuts.">Help</button>
     <input type="file" id="restoreFile" accept=".zip" hidden>
   </footer>
 </aside>
 
 <main>
   <div id="bar" hidden>
-    <button id="close" title="Back to the gallery (Esc). Your work is already saved.">← Gallery</button>
+    <button id="close" data-tip="Back to the gallery (Esc). Your work is already saved.">← Gallery</button>
     <div class="sep"></div>
-    <button data-tool="add" title="Paint the shape back in (B)">Add</button>
-    <button data-tool="erase" title="Paint the shape away (E)">Erase</button>
-    <button data-tool="cut" title="Drag the three dots to shape the neckline (N)">Neckline</button>
-    <label>Brush <input type="range" id="brush" min="3" max="120" value="24"></label>
-    <button id="undo" title="Undo (Ctrl+Z)" disabled>Undo</button>
-    <button id="redoStep" title="Redo (Ctrl+Y)" disabled>Redo</button>
-    <button id="histBtn" title="Every step since you opened this photo. Click one to go back to it.">History</button>
+    <span class="cap">Fix</span>
+    <button data-tool="add" data-tip="Add brush (B): paint over a part the cut-out missed to put it back in the shape.">Add</button>
+    <button data-tool="erase" data-tip="Erase brush (E): paint over anything that should not be in the shape.">Erase</button>
+    <button data-tool="cut" data-tip="Neckline (N): drag the three white dots to choose where the bust is cut off and how it curves.">Neckline</button>
+    <label data-tip="Brush size. The [ and ] keys also change it. Zoom in (scroll) for fine work.">Brush <input type="range" id="brush" min="3" max="120" value="24"></label>
     <div class="sep"></div>
-    <button data-view="overlay" title="Photo with the shape tinted">Overlay</button>
-    <button data-view="shape" title="The finished black shape">Shape</button>
-    <button data-view="photo" title="Photo with just the cut line">Photo</button>
+    <button id="undo" data-tip="Undo the last change (Ctrl+Z)." disabled>Undo</button>
+    <button id="redoStep" data-tip="Redo what you just undid (Ctrl+Y)." disabled>Redo</button>
+    <button id="histBtn" data-tip="Every change since you opened this photo. Click one to go back to it, or reset the photo to how it started.">History</button>
     <div class="sep"></div>
-    <button id="fit" title="Show the whole photo (F)">Fit</button>
-    <button id="gridBtn" title="Show a grid for lining things up (G)">Grid</button>
+    <span class="cap">Show</span>
+    <button data-view="overlay" data-tip="The photo with the shape tinted blue. The orange line is exactly what will be cut.">Overlay</button>
+    <button data-view="shape" data-tip="The finished shape in black. Grey areas are painted but will not be cut (below the neckline, or too thin).">Shape</button>
+    <button data-view="photo" data-tip="The plain photo with only the orange cut line, to check the edge against the face.">Photo</button>
+    <button id="fit" data-tip="Show the whole photo again (F).">Fit</button>
+    <button id="gridBtn" data-tip="Grid lines (G), to judge whether the head is level when straightening.">Grid</button>
     <div class="sep"></div>
-    <button id="rotL" title="Turn the photo a quarter turn left">⟲ Turn</button>
-    <button id="rotR" title="Turn the photo a quarter turn right">Turn ⟳</button>
+    <button id="rotL" data-tip="Turn the photo a quarter turn to the left, if it came in sideways.">⟲ Turn</button>
+    <button id="rotR" data-tip="Turn the photo a quarter turn to the right, if it came in sideways.">Turn ⟳</button>
     <div class="sep"></div>
-    <span class="saved">Saves as you work</span>
+    <span class="saved" data-tip="There is no Save button. Every change is saved the moment you make it.">Saves as you work</span>
   </div>
   <div id="stage">
     <canvas id="cv"></canvas>
@@ -137,34 +162,34 @@ body.home #right{display:none}
           <li>Hair off the face so the forehead, nose, lips and chin show.</li>
           <li>Include the neck and shoulders, so there is room for the neckline.</li>
         </ul>
-        <div class="private">The first photo takes longer while the cut-out model loads.</div>
+        <div class="private">The first photo takes longer while the cut-out model loads. Try the ones in the <b>samples</b> folder first.</div>
       </div>
     </div>
     <div id="hist" hidden>
       <div id="histList"></div>
-      <button id="resetBtn" title="Back to the first automatic cut-out and the starting settings">Reset to how it started</button>
+      <button id="resetBtn" data-tip="Put this photo back to its first automatic cut-out and starting settings. You can undo this.">Reset to how it started</button>
     </div>
     <div id="gallery" hidden>
       <div id="gbar">
-        <input type="text" id="q" placeholder="Search names…">
-        <select id="filter"><option value="all">All</option><option value="todo">To finish</option><option value="done">Finished</option></select>
-        <select id="sort"><option value="added">Newest first</option><option value="name">By name</option></select>
-        <button id="gView" title="Switch the pictures between silhouettes and the photos"></button>
+        <input type="text" id="q" placeholder="Search names…" data-tip="Show only the children whose name contains what you type.">
+        <select id="filter" data-tip="Show everyone, only those still to finish, or only the finished ones."><option value="all">All</option><option value="todo">To finish</option><option value="done">Finished</option></select>
+        <select id="sort" data-tip="Order of the cards."><option value="added">Newest first</option><option value="name">By name</option></select>
+        <button id="gView" data-tip="Switch the cards between the silhouettes and the original photos."></button>
         <span id="gCount"></span>
         <span class="grow"></span>
-        <button id="gAll"></button>
-        <button id="gZip" title="One SVG per child, in a zip"></button>
-        <select id="mat" title="The cutting area the sheet is laid out for. Design Space may shrink a file taller than 11.5 in, so check its size after uploading a 12 × 24 sheet.">
+        <button id="gAll" data-tip="Tick every card shown, or untick them all. With cards ticked, the buttons to the right act on just those."></button>
+        <button id="gProof" data-tip="A page to print on plain paper: every silhouette at its real size on its ornament, with names. Check likeness and fit before cutting.">Proof sheet</button>
+        <button id="gZip" data-tip="One SVG file per child, in a zip, ready to upload to Cricut Design Space."></button>
+        <select id="mat" data-tip="The cutting area the sheet is laid out for. Design Space may shrink a file taller than 11.5 in, so check its size after uploading a 12 × 24 sheet.">
           <option value="11.5x11.5">12 × 12 mat</option>
           <option value="11.5x23.5">12 × 24 mat</option>
           <option value="4.25x11.75">Joy 4.5 × 12 mat</option>
           <option value="8x10.5">Letter page</option>
         </select>
-        <button id="gSheet" title="Children together on sheets the size chosen on the left, to save material"></button>
-        <button id="gDone" title="Mark the selected ones finished, or not finished"></button>
-        <button id="gProof" title="A page to print on plain paper: every silhouette at its real size on its ornament, with names. Check likeness and fit before cutting.">Proof sheet</button>
-        <button id="gForget" class="danger" title="Delete the original photos of the selected children and keep their silhouettes"></button>
-        <button id="gDel" class="danger"></button>
+        <button id="gSheet" data-tip="The children packed together onto sheets of the size chosen on the left, to save material."></button>
+        <button id="gDone" data-tip="Mark the ticked children finished, or not finished."></button>
+        <button id="gForget" class="danger" data-tip="For privacy once you are done: delete the original photos of the ticked children and keep their silhouettes."></button>
+        <button id="gDel" class="danger" data-tip="Delete the ticked children completely: photo and silhouette."></button>
       </div>
       <div id="grid"></div>
     </div>
@@ -173,49 +198,115 @@ body.home #right{display:none}
 </main>
 
 <aside id="right">
-  <div id="panel" hidden class="stack" style="gap:14px">
-    <label class="field"><span>Name</span><input type="text" id="name" maxlength="60"></label>
-    <svg id="orn" viewBox="-2 -2 4 4"></svg>
-    <div id="size"></div>
-    <div class="row">
-      <label class="field" style="flex:1"><span>Shape height (in)</span><input type="number" id="height" min="0.25" max="24" step="0.05"></label>
-      <label class="field" style="flex:1"><span>Ornament (in)</span><input type="number" id="ornD" min="0.5" max="24" step="0.25"></label>
-    </div>
-    <button id="sizeAll" title="Give every photo this shape height, so all the ornaments match">Use this height for everyone</button>
-    <label class="check"><input type="checkbox" id="done"> Finished</label>
-    <label class="check"><input type="checkbox" id="flip"> Face the other way</label>
-    <label class="check"><input type="checkbox" id="cutOn"> Cut off at the neckline</label>
-    <label class="field" title="Tilt the picture until the child sits upright. Double-click to reset."><span>Straighten <b id="tiltV"></b></span><input type="range" id="tilt" min="-45" max="45" step="0.5"></label>
-    <label class="field"><span>Smoothing <b id="smoothV"></b></span><input type="range" id="smooth" min="0" max="10" step="0.5"></label>
-    <label class="field"><span>Thinnest detail kept <b id="detailV"></b></span><input type="range" id="detail" min="0" max="1.5" step="0.1"></label>
-    <div class="row" title="What goes around the silhouette in the files. Applies to every download, the gallery's too.">
-      <label class="field" style="flex:1.4"><span>Around the shape</span><select id="border"><option value="none">Nothing</option><option value="rect">Box</option><option value="circle">Ornament circle</option></select></label>
-      <label class="field" style="flex:1"><span>Space (in)</span><input type="number" id="space" min="0" max="6" step="0.05"></label>
-    </div>
-    <div id="textRows" class="stack" style="gap:14px" title="Lettering under the silhouette, as its own layer in the SVG and on the proof sheet. The preview above is approximate; the files use the real letter shapes. Not included in the PNG.">
-      <div class="row">
-        <label class="field" style="flex:1.4"><span>Text under it</span><select id="text"><option value="none">None</option><option value="name">Name</option><option value="both">Name + line below</option></select></label>
-        <label class="field" style="flex:1"><span>Line below</span><input type="text" id="line2" maxlength="30" placeholder="2026"></label>
+  <div id="panel" hidden class="stack" style="gap:8px">
+    <details class="sec" open>
+      <summary>Child</summary>
+      <div class="in">
+        <label class="field" data-tip="The child's name. It names the files, and it is the name lettered on the ornament if you switch that on below."><span>Name</span><input type="text" id="name" maxlength="60" placeholder="Type the child's name"></label>
+        <label class="check" data-tip="Tick when this child is done. The gallery can then show only the ones still to finish."><input type="checkbox" id="done"> Finished</label>
       </div>
-      <div class="row" id="textMore">
-        <label class="field" style="flex:1.4"><span>Lettering</span><select id="font"></select></label>
-        <label class="field" style="flex:1"><span>Letter size (in)</span><input type="number" id="tsize" min="0.1" max="2" step="0.05"></label>
+    </details>
+
+    <details class="sec" open>
+      <summary>Ornament and size</summary>
+      <div class="in">
+        <svg id="orn" viewBox="0 0 1 1" data-tip="How it will look on the ornament, drawn by the same code that writes the files, at true proportions."></svg>
+        <div id="size"></div>
+        <div class="row">
+          <label class="field" style="flex:1" data-tip="How tall the cut silhouette is, in inches, from the top of the head to the neckline."><span>Silhouette height (in)</span><input type="number" id="height" min="0.25" max="24" step="0.05"></label>
+          <button id="sizeAll" style="flex:1.2;align-self:flex-end;white-space:nowrap" data-tip="Give every child this silhouette height, so all the ornaments match. Photos added later get it too.">Same for everyone</button>
+        </div>
+        <div class="row">
+          <label class="field" style="flex:1.3" data-tip="The shape of the ornament the silhouette goes on."><span>Ornament shape</span><select id="ornShape">
+            <option value="circle">Circle</option><option value="oval">Oval</option><option value="square">Square</option><option value="rect">Rectangle</option>
+            <option value="hexagon">Hexagon</option><option value="heart">Heart</option><option value="star">Star</option></select></label>
+          <label class="field" style="flex:1" data-tip="How wide the ornament is, in inches."><span>Width (in)</span><input type="number" id="ornD" min="0.5" max="24" step="0.25"></label>
+          <label class="field" style="flex:1" id="ornHWrap" data-tip="How tall the ornament is, in inches (ovals and rectangles)."><span>Height (in)</span><input type="number" id="ornH" min="0.5" max="24" step="0.25"></label>
+        </div>
+        <div class="row">
+          <label class="field" style="flex:1" data-tip="The colour of the ornament, for the preview only: wood, white, a painted colour…"><span>Ornament colour</span><input type="color" id="ornColor"></label>
+          <label class="field" style="flex:1" data-tip="The colour of the vinyl or paper you will cut, for the preview only."><span>Vinyl colour</span><input type="color" id="vinylColor"></label>
+        </div>
       </div>
-    </div>
-    <div class="stack">
-      <button class="primary" id="svgBtn">Download SVG for Cricut</button>
-      <button id="pngBtn">Download PNG</button>
-    </div>
-    <div class="stack">
-      <div class="row">
-        <select id="quality"><option value="best">Best cut-out (slower)</option><option value="fast">Fast cut-out</option></select>
-        <button id="redo" title="Run the automatic cut-out again with the model chosen here">Cut out again</button>
+    </details>
+
+    <details class="sec" open>
+      <summary>Shape</summary>
+      <div class="in">
+        <label class="check" data-tip="Mirror the silhouette so the child faces the other direction."><input type="checkbox" id="flip"> Face the other way</label>
+        <label class="check" data-tip="Cut the bust off along the dashed neckline. Use the Neckline tool above the photo to move it. Untick to keep everything in the photo."><input type="checkbox" id="cutOn"> Cut off at the neckline</label>
+        <label class="field" data-tip="Tilt the picture until the head sits level. Switch on Grid above the photo to judge it. Double-click the slider to go back to 0."><span>Straighten <b id="tiltV"></b></span><input type="range" id="tilt" min="-45" max="45" step="0.5"></label>
+        <label class="field" data-tip="How much the outline is rounded. Higher is smoother and easier to cut; lower keeps more of the fine detail in hair and lashes."><span>Smoothing <b id="smoothV"></b></span><input type="range" id="smooth" min="0" max="10" step="0.5"></label>
+        <label class="field" data-tip="Anything thinner than this at the finished size (wisps of hair) is dropped, because it would tear when you weed the vinyl."><span>Thinnest detail kept <b id="detailV"></b></span><input type="range" id="detail" min="0" max="1.5" step="0.1"></label>
       </div>
-      <button id="forget" title="For privacy once you are done: the original photo is deleted, the silhouette stays. It cannot be cut out again afterwards.">Delete the photo, keep the silhouette</button>
-      <button class="danger" id="del">Delete photo and silhouette</button>
-    </div>
+    </details>
+
+    <details class="sec" open id="letterSec">
+      <summary>Lettering</summary>
+      <div class="in">
+        <label class="check" data-tip="Letter the child's name (from the Name box at the top) on the ornament."><input type="checkbox" id="nameOn"> Put the name on it</label>
+        <label class="field" data-tip="A second line under the name: the year, a class name… Leave it empty for none. It shows even if the name is switched off."><span>Second line</span><input type="text" id="line2" maxlength="40" placeholder="for example 2026"></label>
+        <div class="row">
+          <label class="field" style="flex:1.3" data-tip="Straight lines under the silhouette, or one line curved along the bottom edge (round ornaments only)."><span>Where</span><select id="place"><option value="below">Straight, underneath</option><option value="arc">Curved along the edge</option></select></label>
+          <label class="field" style="flex:1" data-tip="The style of the letters."><span>Style</span><select id="font"></select></label>
+        </div>
+        <label class="field" data-tip="The size of the letters in inches. Long names wrap onto two lines and then shrink, so they always stay inside the ornament."><span>Letter size (in)</span><input type="number" id="tsize" min="0.08" max="2" step="0.05"></label>
+        <small class="note">The letters go into the SVG as their own layer, so in Design Space you can cut them, draw them with a pen, or delete them. They are not in the PNG.</small>
+      </div>
+    </details>
+
+    <details class="sec" open>
+      <summary>Files</summary>
+      <div class="in">
+        <div class="row">
+          <label class="field" style="flex:1.4" data-tip="What the files have behind the silhouette: nothing, a plain box, or the ornament's own shape. It arrives in Design Space as its own layer: a size guide you can delete, or a backing you can cut."><span>Behind the silhouette</span><select id="border"><option value="none">Nothing</option><option value="rect">A box</option><option value="ornament">The ornament shape</option></select></label>
+          <label class="field" style="flex:1" data-tip="Blank margin around the silhouette, in inches (for Nothing or A box)."><span>Margin (in)</span><input type="number" id="space" min="0" max="6" step="0.05"></label>
+        </div>
+        <button class="primary" id="svgBtn" data-tip="The cut file for this child. In Cricut Design Space: Upload, choose the file, add it to the canvas.">Download SVG for Cricut</button>
+        <button id="pngBtn" data-tip="A picture of the silhouette on a clear background, for printing or sharing. No lettering.">Download PNG</button>
+      </div>
+    </details>
+
+    <details class="sec">
+      <summary>Photo</summary>
+      <div class="in">
+        <div class="row">
+          <select id="quality" data-tip="Which cut-out model to use. Best follows hair and faces more closely and needs a graphics card; Fast works on any computer."><option value="best">Best cut-out (slower)</option><option value="fast">Fast cut-out</option></select>
+          <button id="redo" data-tip="Run the automatic cut-out again with the model chosen here, if the first try missed. It replaces your brush edits.">Cut out again</button>
+        </div>
+        <button id="forget" data-tip="For privacy once you are done: the original photo is deleted, the silhouette stays. It cannot be cut out again afterwards.">Delete the photo, keep the silhouette</button>
+        <button class="danger" id="del" data-tip="Delete this child completely: photo and silhouette.">Delete photo and silhouette</button>
+      </div>
+    </details>
   </div>
 </aside>
+
+<div id="help" hidden>
+  <div class="sheet">
+    <h2>How to use Silhouette Maker</h2>
+    <div class="private">Hold the mouse over any button or setting for a short explanation.</div>
+    <h3>The steps</h3>
+    <ol>
+      <li><b>Add photos.</b> Side-on, plain bright wall, hair off the face, neck and shoulders in the picture. Each one is cut out automatically and appears in the gallery.</li>
+      <li><b>Open a child</b> by clicking their card. Type their <b>name</b> at the top right.</li>
+      <li><b>Fix the shape</b> if needed. The orange line is what will be cut. Use <b>Add</b> and <b>Erase</b> to paint parts in or out, <b>Neckline</b> to move the bottom cut, <b>Turn</b> and <b>Straighten</b> if the photo is crooked.</li>
+      <li><b>Choose the ornament</b>: its shape and size, and how tall the silhouette is. The picture at the top right shows exactly how it will sit.</li>
+      <li><b>Lettering</b> (optional): the name and a second line, straight or curved.</li>
+      <li><b>Print a proof sheet</b> from the gallery on plain paper to check everything at real size.</li>
+      <li><b>Download</b> the SVG and upload it in Cricut Design Space.</li>
+      <li><b>Afterwards</b>, you can delete the photos and keep only the silhouettes, and back everything up.</li>
+    </ol>
+    <h3>Mouse and keys, on the photo</h3>
+    <div class="cols">
+      <div><kbd>Scroll</kbd> zoom in and out</div><div><kbd>Space</kbd> + drag, or right-drag: move around</div>
+      <div><kbd>B</kbd> Add brush · <kbd>E</kbd> Erase brush</div><div><kbd>[</kbd> <kbd>]</kbd> smaller / bigger brush</div>
+      <div><kbd>N</kbd> Neckline tool</div><div><kbd>G</kbd> grid · <kbd>F</kbd> fit the photo</div>
+      <div><kbd>Ctrl</kbd>+<kbd>Z</kbd> undo · <kbd>Ctrl</kbd>+<kbd>Y</kbd> redo</div><div><kbd>Esc</kbd> back to the gallery</div>
+    </div>
+    <div class="foot"><span class="private">Everything is saved as you work. Photos never leave this computer.</span><button class="primary" id="helpClose">Got it</button></div>
+  </div>
+</div>
+<div id="tip" hidden></div>
 <script src="/static/app.js"></script>
 </body>
 </html>

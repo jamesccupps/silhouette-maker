@@ -106,9 +106,10 @@ def test_border_options_change_the_piece():
     assert engine.layout(r, s, {"space": 0.5})[:2] == (sw + 1.0, sh + 1.0)
     w, h, ox, oy = engine.layout(r, s, {"border": "circle", "orn": 3.0})
     assert (w, h) == (3.0, 3.0) and ox == pytest.approx((3 - sw) / 2)
-    assert "<circle" in engine.svg_single(r, s, "x", {"border": "circle", "orn": 3.0})
+    assert "<ellipse" in engine.svg_single(r, s, "x", {"border": "ornament", "orn": 3.0})
+    assert "<ellipse" in engine.svg_single(r, s, "x", {"border": "circle", "orn": 3.0})  # the older name for it
     assert "<rect" in engine.svg_single(r, s, "x", {"border": "rect", "space": 0.25})
-    assert "<circle" not in engine.svg_single(r, s, "x") and "<rect" not in engine.svg_single(r, s, "x")
+    assert "<ellipse" not in engine.svg_single(r, s, "x") and "<rect" not in engine.svg_single(r, s, "x")
     png = engine.png_cutout(r, s, {"border": "circle", "orn": 3.0})
     assert png.size[0] == png.size[1] and png.getpixel((0, 0))[3] == 0  # corner outside the circle
     tight = engine.png_cutout(r, s)
@@ -165,32 +166,96 @@ def test_iphone_heic_photo_opens(tmp_path):
 needs_font = pytest.mark.skipif(not engine.fonts(), reason="no usable font on this computer")
 
 
+def piece():
+    m = bust()
+    s = settings(m)
+    return engine.outline(m, s), s
+
+
+def path_xs(d):
+    return [float(v) for v in re.findall(r"(-?[\d.]+) -?[\d.]+", d)]
+
+
 @needs_font
 def test_a_name_becomes_outlines_not_text():
     key = engine.fonts()[0]["key"]
-    m = bust()
-    s = settings(m)
-    r = engine.outline(m, s)
+    r, s = piece()
     plain = engine.svg_single(r, s, "Ava")
-    named = engine.svg_single(r, s, "Ava", {"text": "name", "font": key, "tsize": 0.3})
-    both = engine.svg_single(r, s, "Ava", {"text": "both", "line2": "2026", "font": key, "tsize": 0.3})
+    named = engine.svg_single(r, s, "Ava", {"name_on": True, "font": key, "tsize": 0.3})
+    both = engine.svg_single(r, s, "Ava", {"name_on": True, "line2": "2026", "font": key, "tsize": 0.3})
+    only_year = engine.svg_single(r, s, "Ava", {"line2": "2026", "font": key})
     assert "<text" not in named  # Design Space ignores <text>; it must be a path
     assert named.count("<path") == plain.count("<path") + 1 and "Ava lettering" in named
     h = lambda svg: float(re.search(r'height="([\d.]+)in"', svg).group(1))
-    assert h(plain) == 2.25 and h(named) == pytest.approx(2.25 + 0.12 + 0.36) and h(both) > h(named)
-    # no name and no second line: nothing is added
-    assert engine.svg_single(r, s, "  ", {"text": "name", "font": key}) == engine.svg_single(r, s, "  ")
+    assert h(plain) == 2.25 and h(named) == pytest.approx(2.25 + 0.12 + 0.98 * 0.3, abs=0.01) and h(both) > h(named)
+    assert only_year.count("<path") == plain.count("<path") + 1  # the second line does not need the name
+    # nothing to letter: nothing is added
+    assert engine.svg_single(r, s, "  ", {"name_on": True, "font": key}) == engine.svg_single(r, s, "  ")
 
 
 @needs_font
-def test_lettering_is_centred_under_the_shape_and_can_widen_the_piece():
+def test_a_long_name_wraps_then_shrinks_to_stay_on_the_ornament():
     key = engine.fonts()[0]["key"]
-    m = bust()
-    s = settings(m)
-    r = engine.outline(m, s)
-    sw, sh = engine.size_in(r, s)
-    w, h, ox, oy = engine.layout(r, s, {"text": "name", "font": key, "tsize": 0.5}, "A very long name indeed")
-    assert w > sw and ox == pytest.approx((w - sw) / 2) and oy == 0
-    d = engine.text_d("Ava", key, 21.6, 100.0, 50.0)
-    xs = [float(v) for v in re.findall(r"(-?[\d.]+) -?[\d.]+", d)]
-    assert min(xs) < 100 < max(xs) and (min(xs) + max(xs)) / 2 == pytest.approx(100, abs=3)
+    r, s = piece()
+    o = {"name_on": True, "font": key, "tsize": 0.3, "orn": 3.0}
+    short = engine._layout(r, s, o, "Ava", framed=True)
+    assert [(t, size) for t, size, _, _ in short["texts"]] == [("Ava", 0.3)] and short["fits"]
+
+    two_words = engine._layout(r, s, o, "Annabelle Montgomery", framed=True)
+    assert [t for t, *_ in two_words["texts"]] == ["Annabelle", "Montgomery"]  # wrapped at the space
+
+    camera = engine._layout(r, s, o, "IMG_20261119_190204", framed=True)  # no space to wrap at
+    (text, size, cx, base), = camera["texts"]
+    assert size < 0.3 and cx == pytest.approx(camera["w"] / 2)
+    for lay in (short, two_words, camera):
+        assert (lay["w"], lay["h"]) == (3.0, pytest.approx(3.0, abs=0.75))
+        for t, size, cx, base in lay["texts"]:
+            half = engine.text_width_em(t, key) * size / 2
+            y = base - 0.35 * size - lay["cy"]
+            assert half * 2 <= 0.93 * max(0.75, 3.0 * (1 - (y / 1.5) ** 2) ** 0.5 if abs(y) < 1.5 else 0.75)
+
+
+@needs_font
+def test_lettering_can_curve_along_the_bottom_of_a_round_ornament():
+    key = engine.fonts()[0]["key"]
+    r, s = piece()
+    o = {"name_on": True, "line2": "2026", "place": "arc", "font": key, "tsize": 0.3, "orn": 3.5}
+    lay = engine._layout(r, s, o, "Ava")
+    assert lay["arc"] and not lay["texts"] and (lay["w"], lay["h"]) == (3.5, 3.5)
+    assert "Ava" in lay["arc"][0] and "2026" in lay["arc"][0]
+    u = 72.0
+    d = engine.text_arc_d("Ava 2026", key, 0.3 * u, 100.0, 100.0, 1.4 * u)
+    pts = np.array(re.findall(r"(-?[\d.]+) (-?[\d.]+)", d), dtype=float)
+    dist = np.hypot(pts[:, 0] - 100, pts[:, 1] - 100)
+    assert dist.min() > (1.4 - 0.32) * u and dist.max() < (1.4 + 0.12) * u  # every letter hugs the circle
+    assert pts[:, 1].min() > 100 and abs(pts[:, 0].mean() - 100) < 0.2 * u  # along the bottom, centred
+    # a very long line shrinks instead of wrapping right round
+    long_lay = engine._layout(r, s, dict(o, line2="Sunshine Room Preschool Class of 2026"), "Annabelle Montgomery")
+    assert long_lay["arc"][1] < 0.3
+    # other shapes have no curve to follow: the lines go underneath
+    square = engine._layout(r, s, dict(o, shape="square"), "Ava")
+    assert square["arc"] is None and len(square["texts"]) == 2
+
+
+@pytest.mark.parametrize("shape", list(engine.ORNAMENTS))
+def test_every_ornament_shape_fills_its_box_and_exports(shape):
+    pts = engine.ornament_points(shape, 3.0, 4.0)
+    assert pts[:, 0].min() == pytest.approx(-1.5) and pts[:, 0].max() == pytest.approx(1.5)
+    assert pts[:, 1].min() == pytest.approx(-2.0) and pts[:, 1].max() == pytest.approx(2.0)
+    r, s = piece()
+    o = {"border": "ornament", "shape": shape, "orn": 4.0, "orn_h": 5.0}
+    svg = engine.svg_single(r, s, "Ava", o)
+    tall = shape in ("oval", "rect")  # only these take a separate height
+    assert f'width="4.0000in" height="{5 if tall else 4}.0000in"' in svg and "Ava ornament" in svg
+    png = engine.png_cutout(r, s, o)
+    assert png.size[0] / png.info["dpi"][0] == pytest.approx(4.0, abs=0.02)
+    on = engine.on_ornament("Ava", r, s, o)
+    assert on["w"] == 4.0 and "Ava ornament" not in on["body"]  # the preview draws its own outline
+    assert engine.on_ornament("Ava", None, s, o)["fits"]  # nothing cut yet: just the ornament
+
+
+def test_a_shape_too_big_for_the_ornament_is_reported():
+    r, s = piece()
+    assert engine.on_ornament("x", r, s, {"orn": 3.0})["fits"]
+    assert not engine.on_ornament("x", r, s, {"orn": 1.5})["fits"]
+    assert not engine.on_ornament("x", r, s, {"orn": 3.0, "shape": "star"})["fits"]

@@ -59,7 +59,7 @@ def test_add_edit_export_delete(client):
     assert got["settings"]["tilt_deg"] == 45 and got["outline"]["height_in"] == 3
 
     svg = client.get(url + "/export.svg?border=circle&orn=8", base_url=BASE)
-    assert svg.status_code == 200 and b"<circle" in svg.data and b'width="8.0000in"' in svg.data
+    assert svg.status_code == 200 and b"<ellipse" in svg.data and b'width="8.0000in"' in svg.data
     assert "Ava B.svg" in svg.headers["Content-Disposition"]
     png = client.get(url + "/export.png", base_url=BASE)
     assert Image.open(io.BytesIO(png.data)).mode == "RGBA"
@@ -318,3 +318,41 @@ def test_fonts_and_lettering_in_exports(client):
     assert client.get(url + "?text=nonsense&font=nope&tsize=huge", base_url=BASE).data == plain
     png = client.get(f"/api/items/{it['id']}/export.png?text=name", base_url=BASE)
     assert png.status_code == 200
+
+
+def test_camera_file_names_are_not_names(client):
+    names = {f: add(client, name=f)["name"] for f in (
+        "IMG_20261119_190204.jpg", "PXL_20261119_233031583.jpg", "DSC01234.jpg", "P1040123.jpg",
+        "20261119_101500.jpg", "image.jpg", "Ava.jpg", "Paul.jpg", "Anna-Marie 2.jpg", "Imogen.jpg")}
+    assert [k for k, v in names.items() if v == ""] == [
+        "IMG_20261119_190204.jpg", "PXL_20261119_233031583.jpg", "DSC01234.jpg", "P1040123.jpg",
+        "20261119_101500.jpg", "image.jpg"]
+    assert (names["Ava.jpg"], names["Paul.jpg"], names["Anna-Marie 2.jpg"], names["Imogen.jpg"]) == (
+        "Ava", "Paul", "Anna-Marie 2", "Imogen")
+    unnamed = client.get("/api/items", base_url=BASE).get_json()[0]
+    svg = client.get(f"/api/items/{unnamed['id']}/export.svg", base_url=BASE)
+    assert "silhouette.svg" in svg.headers["Content-Disposition"]
+    assert "Unnamed" in client.get("/proof", base_url=BASE).data.decode()
+
+
+def test_preview_is_drawn_like_the_files(client):
+    it = add(client)
+    url = f"/api/items/{it['id']}/preview"
+    r = client.get(url + "?shape=circle&orn=3&fg=%23224466&bg=%23ffffff", base_url=BASE).get_json()
+    assert r["fits"] and "<ellipse" in r["html"] and 'fill="#224466"' in r["html"] and 'fill="#ffffff"' in r["html"]
+    x0, y0, w, h = map(float, r["viewBox"].split())
+    assert (w, h) == (pytest.approx(3.24 * 72), pytest.approx(3.24 * 72))
+    assert not client.get(url + "?shape=circle&orn=1", base_url=BASE).get_json()["fits"]
+    heart = client.get(url + "?shape=heart&orn=4", base_url=BASE).get_json()
+    assert "<polygon" in heart["html"]
+    bad = client.get(url + "?shape=dodecahedron&fg=red&bg=javascript:alert(1)", base_url=BASE).get_json()
+    assert "<ellipse" in bad["html"] and "javascript" not in bad["html"] and "red" not in bad["html"]
+    if client.get("/api/fonts", base_url=BASE).get_json():
+        named = client.get(url + "?name_on=1&name=Ava%20Typed%20Just%20Now&line2=2026", base_url=BASE).get_json()
+        assert named["html"].count("<path") == r["html"].count("<path") + 1  # the unsaved name is used
+
+    blank = io.BytesIO()
+    Image.new("L", (it["w"], it["h"]), 0).save(blank, "PNG")
+    client.put(f"/api/items/{it['id']}/mask", base_url=BASE, data=blank.getvalue())
+    empty = client.get(url, base_url=BASE).get_json()
+    assert empty["fits"] and "<path" not in empty["html"]  # nothing to cut: just the ornament
