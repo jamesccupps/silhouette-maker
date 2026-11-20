@@ -7,7 +7,7 @@ const tint = document.createElement("canvas"), tctx = tint.getContext("2d");
 const prefs = Object.assign({
   height: 2.25, quality: "best", grid: false, mat: "11.5x11.5",
   ornShape: "circle", ornD: 3, ornH: 4, ornColor: "#d9b27c", vinylColor: "#111111", // the ornament
-  nameOn: false, line2: "", place: "below", font: "serif", tsize: 0.3, // lettering
+  nameOn: false, line2: "", place: "below", font: "serif", tsize: 0.3, font2: "", tsize2: 0.24, // lettering ("" = same font as the name)
   border: "none", space: 0, // what the files have behind the silhouette
 }, readPrefs());
 if (prefs.text === "name" || prefs.text === "both") prefs.nameOn = true; // from the version before
@@ -233,6 +233,7 @@ function fillOptions() { // the choices that apply to every child
   $("ornColor").value = prefs.ornColor; $("vinylColor").value = prefs.vinylColor;
   $("nameOn").checked = prefs.nameOn; $("place").value = round ? prefs.place : "below"; $("place").disabled = !round;
   $("font").value = prefs.font; $("tsize").value = prefs.tsize;
+  $("font2").value = prefs.font2; $("tsize2").value = prefs.tsize2;
   if (document.activeElement !== $("line2")) $("line2").value = prefs.line2;
   $("border").value = prefs.border; $("space").value = prefs.space; $("space").disabled = prefs.border === "ornament";
 }
@@ -332,6 +333,8 @@ function exportQuery() { // what goes around and under the silhouette, for every
     if (prefs.line2.trim()) q.set("line2", prefs.line2);
     q.set("place", prefs.ornShape === "circle" ? prefs.place : "below");
     q.set("font", prefs.font); q.set("tsize", prefs.tsize);
+    if (prefs.font2) q.set("font2", prefs.font2);
+    q.set("tsize2", prefs.tsize2);
   }
   return q.toString();
 }
@@ -349,6 +352,8 @@ option("line2", "input", (t) => { prefs.line2 = t.value; });
 option("place", "change", (t) => { prefs.place = t.value; });
 option("font", "change", (t) => { prefs.font = t.value; });
 option("tsize", "change", (t) => { prefs.tsize = num(t, 0.08, 2, 0.3); });
+option("font2", "change", (t) => { prefs.font2 = t.value; });
+option("tsize2", "change", (t) => { prefs.tsize2 = num(t, 0.08, 2, 0.24); });
 option("border", "change", (t) => { prefs.border = t.value; });
 option("space", "change", (t) => { prefs.space = Math.min(6, Math.max(0, +t.value || 0)); });
 $("quality").addEventListener("change", (e) => { prefs.quality = e.target.value; savePrefs(); });
@@ -751,16 +756,26 @@ if (!prefs.seenHelp) showHelp(true); // the first time the app is opened
 /* ---------- start ---------- */
 setTool("add"); setMode("overlay");
 (async () => {
-  try {
-    items = await api("GET", "/api/items");
-    fonts = await api("GET", "/api/fonts");
-  } catch (e) { busy(e.message); }
-  $("letterSec").hidden = !fonts.length; // no usable font on this computer: no lettering
-  $("font").innerHTML = fonts.map((f) => `<option value="${f.key}">${esc(f.label)}</option>`).join("");
-  if (fonts.length && !fonts.some((f) => f.key === prefs.font)) prefs.font = fonts[0].key;
+  try { items = await api("GET", "/api/items"); } catch (e) { busy(e.message); }
+  loadFonts(); // not awaited: looking through the computer's fonts can take a few seconds
   renderList();
   fromHash();
 })();
+async function loadFonts() {
+  let r;
+  try { r = await api("GET", "/api/fonts"); } catch { return; }
+  fonts = r.fonts;
+  $("letterSec").hidden = !fonts.length; // no usable font on this computer: no lettering
+  const list = (pick) => fonts.filter(pick).map((f) => `<option value="${esc(f.key)}">${esc(f.label)}</option>`).join("");
+  const groups = `<optgroup label="Suggested">${list((f) => f.suggested)}</optgroup>` +
+    `<optgroup label="All fonts on this computer">${list(() => true)}</optgroup>`;
+  $("font").innerHTML = groups;
+  $("font2").innerHTML = `<option value="">Same as the name</option>` + groups;
+  const known = (k) => fonts.some((f) => f.key === k);
+  if (!known(prefs.font)) prefs.font = r.old[prefs.font] || r.default || ""; // a choice from an earlier version
+  if (prefs.font2 && !known(prefs.font2)) prefs.font2 = "";
+  if (cur) { fillOptions(); refreshPreview(); }
+}
 function fromHash() {
   const it = items.find((i) => "#" + i.id === location.hash);
   if (it !== (cur || undefined)) select(it || null);

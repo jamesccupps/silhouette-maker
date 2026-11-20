@@ -6,6 +6,7 @@ one-time download of the model file itself; photos are never sent anywhere.
 from __future__ import annotations
 
 import gc
+import logging
 import os
 import threading
 from functools import lru_cache
@@ -348,56 +349,98 @@ TEXT_GAP = 0.12  # inches between the shape and the first line of text
 # ---- lettering -------------------------------------------------------------
 # Design Space ignores <text> in an uploaded SVG, so names are written as
 # outlines, traced from a font that is already on this computer.
-FONTS = {  # key: (label, CSS for the on-screen preview, font files tried in order)
-    "serif": ("Serif", "font-family:Georgia,'Times New Roman',serif",
-              ["georgia.ttf", "times.ttf", "DejaVuSerif.ttf", "LiberationSerif-Regular.ttf", "Georgia.ttf"]),
-    "sans": ("Plain", "font-family:Arial,Helvetica,sans-serif",
-             ["arial.ttf", "segoeui.ttf", "DejaVuSans.ttf", "LiberationSans-Regular.ttf", "Arial.ttf"]),
-    "bold": ("Bold", "font-family:Arial,Helvetica,sans-serif;font-weight:bold",
-             ["arialbd.ttf", "segoeuib.ttf", "DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf", "Arial Bold.ttf"]),
-    "script": ("Handwriting", "font-family:'Segoe Script','Comic Sans MS',cursive",
-               ["segoesc.ttf", "segoepr.ttf", "comic.ttf", "Comic Sans MS.ttf"]),
+# Any font installed on the computer can be used. A font's key is its file
+# name in lower case ("georgia.ttf"; "cambria.ttc#1" inside a collection).
+_OLD_KEYS = {  # choices from earlier versions -> the files they meant, first one found wins
+    "serif": ["georgia.ttf", "times.ttf", "dejavuserif.ttf", "liberationserif-regular.ttf"],
+    "sans": ["arial.ttf", "segoeui.ttf", "dejavusans.ttf", "liberationsans-regular.ttf"],
+    "bold": ["arialbd.ttf", "segoeuib.ttf", "dejavusans-bold.ttf", "liberationsans-bold.ttf"],
+    "script": ["segoesc.ttf", "segoepr.ttf", "comic.ttf"],
 }
+_SUGGESTED = ["georgia.ttf", "arial.ttf", "arialbd.ttf", "segoesc.ttf", "segoepr.ttf", "gabriola.ttf", "inkfree.ttf",
+              "lhandw.ttf", "brushsci.ttf", "comic.ttf", "times.ttf", "verdana.ttf", "cooperblack.ttf", "coopbl.ttf",
+              "dejavuserif.ttf", "dejavusans.ttf", "dejavusans-bold.ttf"]
 
 
 def _font_dirs() -> list[Path]:
-    dirs = [Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts", Path("/usr/share/fonts"),
-            Path("/Library/Fonts"), Path("/System/Library/Fonts/Supplemental"), Path.home() / ".fonts"]
+    dirs = [Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts",
+            Path(os.environ.get("LOCALAPPDATA", "~")).expanduser() / "Microsoft" / "Windows" / "Fonts",  # fonts you installed
+            Path("/usr/share/fonts"), Path("/usr/local/share/fonts"), Path.home() / ".fonts",
+            Path.home() / ".local" / "share" / "fonts",
+            Path("/Library/Fonts"), Path("/System/Library/Fonts/Supplemental"), Path.home() / "Library" / "Fonts"]
     return [d for d in dirs if d.is_dir()]
 
 
-@lru_cache(maxsize=None)
-def font_file(key: str):
-    """Path of the font for this choice, or None when it is not on this computer."""
-    if key not in FONTS:
-        return None
+logging.getLogger("fontTools").setLevel(logging.ERROR)  # it grumbles about odd dates in old fonts
+_scan_lock = threading.Lock()
+
+
+def _registry() -> dict:
+    """{key: (path, number in its collection or -1, name shown)} for every
+    font here that has ordinary letters and digits. Looking through a few
+    hundred fonts takes a few seconds, so it is done once."""
+    with _scan_lock:
+        return _scan()
+
+
+@lru_cache(maxsize=1)
+def _scan() -> dict:
     try:
-        import fontTools  # noqa: F401
+        from fontTools.ttLib import TTCollection, TTFont
     except ImportError:
-        return None
-    names = FONTS[key][2]
+        return {}
+    out, seen = {}, set()
     for d in _font_dirs():
-        for n in names:
-            if (d / n).is_file():
-                return d / n
-    for d in _font_dirs():  # Linux keeps fonts in sub-folders
-        for n in names:
-            hit = next(d.rglob(n), None)
-            if hit:
-                return hit
-    return None
+        for f in sorted(d.rglob("*")):
+            ext = f.suffix.lower()
+            if ext not in (".ttf", ".otf", ".ttc"):
+                continue
+            try:
+                count = len(TTCollection(str(f), lazy=True).fonts) if ext == ".ttc" else 1
+                for i in range(count):
+                    number = i if ext == ".ttc" else -1
+                    font = TTFont(str(f), fontNumber=number, lazy=True)
+                    cmap = font.getBestCmap() or {}
+                    if not all(ord(c) in cmap for c in "AaZz09"):
+                        continue  # a symbol font
+                    names = font["name"]
+                    family, style = names.getBestFamilyName(), names.getBestSubFamilyName()
+                    label = family if style in (None, "", "Regular", "Normal", "Roman", "Book") else f"{family} {style}"
+                    key = f.name.lower() + (f"#{i}" if ext == ".ttc" else "")
+                    if label and label not in seen and key not in out:
+                        seen.add(label)
+                        out[key] = (f, number, label)
+            except Exception:
+                continue  # a damaged or unusual font file: leave it out
+    return out
+
+
+def resolve_font(key) -> str | None:
+    """A usable font key for this choice: itself, what an older choice meant,
+    or the default. None when the computer has no usable font at all."""
+    reg = _registry()
+    if key in reg:
+        return key
+    for old in (key, "serif"):
+        for name in _OLD_KEYS.get(old, []):
+            if name in reg:
+                return name
+    return next(iter(sorted(reg, key=lambda k: reg[k][2].lower())), None)
 
 
 def fonts() -> list[dict]:
-    """The lettering choices that work here."""
-    return [{"key": k, "label": v[0], "css": v[1]} for k, v in FONTS.items() if font_file(k)]
+    """Every lettering choice here, by name: [{"key", "label", "suggested"}]."""
+    reg = _registry()
+    return [{"key": k, "label": v[2], "suggested": k in _SUGGESTED}
+            for k, v in sorted(reg.items(), key=lambda kv: kv[1][2].lower())]
 
 
-@lru_cache(maxsize=None)
+@lru_cache(maxsize=64)
 def _font(key: str):
     from fontTools.ttLib import TTFont
 
-    return TTFont(str(font_file(key)), lazy=True)
+    path, number, _ = _registry()[resolve_font(key)]
+    return TTFont(str(path), fontNumber=number, lazy=True)
 
 
 def _run(text: str, key: str):
@@ -433,25 +476,36 @@ def text_d(text: str, key: str, size: float, cx: float, baseline: float) -> str:
     return pen.getCommands()
 
 
-def text_arc_d(text: str, key: str, size: float, cx: float, cy: float, radius: float) -> str:
+def arc_d(segments: list[tuple[str, str, float]], cx: float, cy: float, radius: float) -> str:
     """Text as outlines along the bottom of a circle: centred at the bottom,
-    reading left to right, tops of the letters towards the centre."""
+    reading left to right, tops of the letters towards the centre. segments is
+    [(text, font key, letter size)], one after another, so the name and the
+    second line can differ in font and size."""
     from fontTools.pens.svgPathPen import SVGPathPen
     from fontTools.pens.transformPen import TransformPen
 
-    font = _font(key)
-    glyphs, hmtx = font.getGlyphSet(), font["hmtx"]
-    run, w, upm = _run(text, key)
-    k = size / upm
-    pen = SVGPathPen(glyphs, ntos=lambda v: f"{v:.2f}")
-    for g, x in run:
-        adv = hmtx[g][0]
-        th = (x + adv / 2 - w / 2) * k / radius  # angle of this letter's middle, 0 = bottom
-        c, sn = np.cos(th), np.sin(th)
-        px, py = cx + radius * sn, cy + radius * c
-        glyphs[g].draw(TransformPen(pen, (k * c, -k * sn, -k * sn, -k * c,
-                                          px - k * adv / 2 * c, py + k * adv / 2 * sn)))
-    return pen.getCommands()
+    runs = []
+    for text, key, size in segments:
+        run, w, upm = _run(text, key)
+        runs.append((run, _font(key), size / upm, w * size / upm))
+    total = sum(r[3] for r in runs)
+    out, start = [], 0.0
+    for run, font, k, width in runs:
+        glyphs, hmtx = font.getGlyphSet(), font["hmtx"]
+        pen = SVGPathPen(glyphs, ntos=lambda v: f"{v:.2f}")
+        for g, x in run:
+            adv = hmtx[g][0] * k
+            th = (start + x * k + adv / 2 - total / 2) / radius  # angle of this letter's middle, 0 = bottom
+            c, sn = np.cos(th), np.sin(th)
+            px, py = cx + radius * sn, cy + radius * c
+            glyphs[g].draw(TransformPen(pen, (k * c, -k * sn, -k * sn, -k * c, px - adv / 2 * c, py + adv / 2 * sn)))
+        out.append(pen.getCommands())
+        start += width
+    return "".join(out)
+
+
+def text_arc_d(text: str, key: str, size: float, cx: float, cy: float, radius: float) -> str:
+    return arc_d([(text, key, size)], cx, cy, radius)
 
 
 # ---- ornaments ---------------------------------------------------------------
@@ -530,10 +584,16 @@ def _opts(opts) -> dict:
         the height only counts for ovals and rectangles)
     name_on, line2: letter the child's name and/or a second line
     place: below (straight, under the shape) | arc (curved along the bottom of a circle)
-    font, tsize: a key of FONTS, letter size in inches (shrunk when it would not fit)
+    font, tsize: the name's font (see fonts()) and letter size in inches
+    font2, tsize2: the same for the second line (by default the name's font, a little smaller)
+        Sizes are what you ask for; lettering shrinks when it would not fit.
     """
     o = {"border": "none", "space": 0.0, "shape": "circle", "orn": 3.0, "orn_h": 0.0,
-         "name_on": False, "line2": "", "place": "below", "font": "serif", "tsize": 0.3, **(opts or {})}
+         "name_on": False, "line2": "", "place": "below", "font": "serif", "tsize": 0.3,
+         "font2": None, "tsize2": None, **(opts or {})}
+    o["font"] = resolve_font(o["font"])
+    o["font2"] = resolve_font(o["font2"]) if o["font2"] else o["font"]
+    o["tsize2"] = float(o["tsize2"]) if o["tsize2"] else float(o["tsize"]) * 0.8
     if o["border"] == "circle":  # the name older links use
         o["border"] = "ornament"
     if o["shape"] not in ORNAMENTS:
@@ -558,14 +618,14 @@ def _shape_points(result: dict, settings: dict) -> np.ndarray:
 
 
 def _wanted_lines(name: str, o: dict) -> list[list]:
-    """[[text, letter size]] the user asked for, before fitting."""
-    if not font_file(o["font"]):
+    """[[text, letter size, font]] the user asked for, before fitting."""
+    if not o["font"]:
         return []
-    size, out = float(o["tsize"]), []
+    out = []
     if o["name_on"] and name.strip():
-        out.append([" ".join(name.split()), size])
+        out.append([" ".join(name.split()), float(o["tsize"]), o["font"]])
     if str(o["line2"]).strip():
-        out.append([" ".join(str(o["line2"]).split()), size * 0.8])
+        out.append([" ".join(str(o["line2"]).split()), float(o["tsize2"]), o["font2"]])
     return out
 
 
@@ -582,46 +642,49 @@ def _wrap(text: str, key: str) -> list[str]:
 def _layout(result: dict, settings: dict, opts, name: str, framed: bool = False) -> dict:
     """Where everything in one piece goes, in inches from the piece's top-left.
 
-    {"w", "h", "ox", "oy" (the shape's top-left), "texts": [(text, size, centre_x, baseline_y)],
-     "arc": (text, size, centre_x, centre_y, radius) or None, "fits": everything is inside the ornament}
+    {"w", "h", "ox", "oy" (the shape's top-left), "texts": [(text, size, centre_x, baseline_y, font)],
+     "arc": {"segments": [(text, font, size)], "cx", "cy", "radius"} or None,
+     "fits": everything is inside the ornament}
 
     Lettering is always fitted to the ornament: a long name wraps onto two
     lines, then shrinks, so it never runs off the edge."""
     o = _opts(opts)
     sw, sh = size_in(result, settings)
     ow, oh = orn_size(o)
-    key = o["font"]
     lines = _wanted_lines(name, o)
     use_arc = bool(lines) and o["place"] == "arc" and o["shape"] == "circle"
     framed = framed or o["border"] == "ornament" or use_arc
     texts, arc, lift = [], None, 0.0  # everything below is relative to the ornament's centre first
 
     if use_arc:
-        dot = " · " if _font(key).getBestCmap().get(0xB7) else " - "
-        text, size = dot.join(t for t, _ in lines), lines[0][1]
-        for _ in range(3):  # the radius depends on the size, so settle it
-            radius = ow / 2 - 0.12 - 0.26 * size
+        first_font = lines[0][2]
+        dot = " \u00b7 " if _font(first_font).getBestCmap().get(0xB7) else " - "
+        segs = [[t + (dot if i < len(lines) - 1 else ""), f, size] for i, (t, size, f) in enumerate(lines)]
+        for _ in range(4):  # the radius depends on the sizes, so settle it
+            biggest = max(seg[2] for seg in segs)
+            radius = ow / 2 - 0.12 - 0.26 * biggest
             longest = radius * np.deg2rad(200)
-            width = text_width_em(text, key) * size
+            width = sum(text_width_em(t, f) * size for t, f, size in segs)
             if width <= longest:
                 break
-            size = max(0.06, size * longest / width)
-        arc = (text, size, 0.0, 0.0, radius)
-        lift = min(0.45 * size + 0.04, max(0.0, (oh - sh) / 2))  # the shape moves up to clear the letters
+            for seg in segs:  # everything shrinks together, keeping the two sizes in proportion
+                seg[2] = max(0.06, seg[2] * longest / width)
+        arc = {"segments": [tuple(seg) for seg in segs], "radius": radius}
+        lift = min(0.45 * biggest + 0.04, max(0.0, (oh - sh) / 2))  # the shape moves up to clear the letters
         top = -sh / 2 - lift
     else:
         wrapped = False
         for _ in range(6):  # sizes move the lines, which changes the room each one has
-            block = TEXT_GAP + sum(1.2 * size for _, size in lines) if lines else 0.0
+            block = TEXT_GAP + sum(1.2 * size for _, size, _ in lines) if lines else 0.0
             top = -(sh + block) / 2
             y, placed, again = top + sh + TEXT_GAP, [], False
-            for i, (t, size) in enumerate(lines):
+            for i, (t, size, f) in enumerate(lines):
                 # the narrower of the room at the top and at the bottom of the letters
                 room = max(0.2 * ow, 0.92 * min(_room(o["shape"], ow, oh, y + 0.1 * size),
                                                 _room(o["shape"], ow, oh, y + 0.95 * size)))
-                width = text_width_em(t, key) * size
+                width = text_width_em(t, f) * size
                 if width > room and not wrapped and i == 0 and o["name_on"] and name.strip() and " " in t:
-                    lines[0:1] = [[part, size] for part in _wrap(t, key)]  # a long name: two lines
+                    lines[0:1] = [[part, size, f] for part in _wrap(t, f)]  # a long name: two lines
                     wrapped = again = True
                     break
                 if width > room:
@@ -629,7 +692,7 @@ def _layout(result: dict, settings: dict, opts, name: str, framed: bool = False)
                     if wrapped and i < 2:  # the two halves of a name stay the same size
                         lines[0][1] = lines[1][1] = size = min(lines[0][1], lines[1][1])
                     again = True
-                placed.append((t, size, 0.0, y + 0.78 * size))
+                placed.append((t, size, 0.0, y + 0.78 * size, f))
                 y += 1.2 * size
             if not again:
                 break
@@ -637,8 +700,8 @@ def _layout(result: dict, settings: dict, opts, name: str, framed: bool = False)
 
     corners = [(-sw / 2, top), (sw / 2, top), (-sw / 2, top + sh), (sw / 2, top + sh)]
     inked = [(x - sw / 2, y + top) for x, y in _shape_points(result, settings)]  # the outline itself, not its box
-    for t, size, _, base in texts:
-        half = text_width_em(t, key) * size / 2
+    for t, size, _, base, f in texts:
+        half = text_width_em(t, f) * size / 2
         box = [(-half, base - 0.7 * size), (half, base - 0.7 * size), (-half, base + 0.2 * size), (half, base + 0.2 * size)]
         corners += box
         inked += box
@@ -655,8 +718,8 @@ def _layout(result: dict, settings: dict, opts, name: str, framed: bool = False)
         w, h = (right - left) + 2 * sp, (bottom - top) + 2 * sp
         cx, cy = sp - left, sp - top
     return {"w": w, "h": h, "ox": cx - sw / 2, "oy": cy + top, "cx": cx, "cy": cy, "fits": fits,
-            "texts": [(t, size, cx + x, cy + base) for t, size, x, base in texts],
-            "arc": (arc[0], arc[1], cx, cy, arc[4]) if arc else None, "o": o}
+            "texts": [(t, size, cx + x, cy + base, f) for t, size, x, base, f in texts],
+            "arc": dict(arc, cx=cx, cy=cy) if arc else None, "o": o}
 
 
 def layout(result: dict, settings: dict, opts=None, name: str = ""):
@@ -679,10 +742,10 @@ def _piece(name: str, result: dict, settings: dict, lay: dict, x: float, y: floa
                f'fill="{BORDER_FILL}"><title>{_xml(name)} border</title></rect>\n')
     d = placed_d(result, settings, x + lay["ox"], y + lay["oy"])
     out += f'<path fill="{fill}" fill-rule="evenodd" d="{d}"><title>{_xml(name)}</title></path>\n'
-    td = "".join(text_d(t, o["font"], size * u, (x + cx) * u, (y + base) * u) for t, size, cx, base in lay["texts"])
+    td = "".join(text_d(t, f, size * u, (x + cx) * u, (y + base) * u) for t, size, cx, base, f in lay["texts"])
     if lay["arc"]:
-        t, size, cx, cy, radius = lay["arc"]
-        td += text_arc_d(t, o["font"], size * u, (x + cx) * u, (y + cy) * u, radius * u)
+        a = lay["arc"]
+        td += arc_d([(t, f, size * u) for t, f, size in a["segments"]], (x + a["cx"]) * u, (y + a["cy"]) * u, a["radius"] * u)
     if td:
         out += f'<path fill="{text_fill}" d="{td}"><title>{_xml(name)} lettering</title></path>\n'
     return out

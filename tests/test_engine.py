@@ -199,18 +199,18 @@ def test_a_long_name_wraps_then_shrinks_to_stay_on_the_ornament():
     r, s = piece()
     o = {"name_on": True, "font": key, "tsize": 0.3, "orn": 3.0}
     short = engine._layout(r, s, o, "Ava", framed=True)
-    assert [(t, size) for t, size, _, _ in short["texts"]] == [("Ava", 0.3)] and short["fits"]
+    assert [(t, size) for t, size, *_ in short["texts"]] == [("Ava", 0.3)] and short["fits"]
 
     two_words = engine._layout(r, s, o, "Annabelle Montgomery", framed=True)
     assert [t for t, *_ in two_words["texts"]] == ["Annabelle", "Montgomery"]  # wrapped at the space
 
     camera = engine._layout(r, s, o, "IMG_20261119_190204", framed=True)  # no space to wrap at
-    (text, size, cx, base), = camera["texts"]
+    (text, size, cx, base, _), = camera["texts"]
     assert size < 0.3 and cx == pytest.approx(camera["w"] / 2)
     for lay in (short, two_words, camera):
         assert (lay["w"], lay["h"]) == (3.0, pytest.approx(3.0, abs=0.75))
-        for t, size, cx, base in lay["texts"]:
-            half = engine.text_width_em(t, key) * size / 2
+        for t, size, cx, base, f in lay["texts"]:
+            half = engine.text_width_em(t, f) * size / 2
             y = base - 0.35 * size - lay["cy"]
             assert half * 2 <= 0.93 * max(0.75, 3.0 * (1 - (y / 1.5) ** 2) ** 0.5 if abs(y) < 1.5 else 0.75)
 
@@ -222,7 +222,7 @@ def test_lettering_can_curve_along_the_bottom_of_a_round_ornament():
     o = {"name_on": True, "line2": "2026", "place": "arc", "font": key, "tsize": 0.3, "orn": 3.5}
     lay = engine._layout(r, s, o, "Ava")
     assert lay["arc"] and not lay["texts"] and (lay["w"], lay["h"]) == (3.5, 3.5)
-    assert "Ava" in lay["arc"][0] and "2026" in lay["arc"][0]
+    assert [t.strip(" \u00b7-") for t, _, _ in lay["arc"]["segments"]] == ["Ava", "2026"]
     u = 72.0
     d = engine.text_arc_d("Ava 2026", key, 0.3 * u, 100.0, 100.0, 1.4 * u)
     pts = np.array(re.findall(r"(-?[\d.]+) (-?[\d.]+)", d), dtype=float)
@@ -230,8 +230,9 @@ def test_lettering_can_curve_along_the_bottom_of_a_round_ornament():
     assert dist.min() > (1.4 - 0.32) * u and dist.max() < (1.4 + 0.12) * u  # every letter hugs the circle
     assert pts[:, 1].min() > 100 and abs(pts[:, 0].mean() - 100) < 0.2 * u  # along the bottom, centred
     # a very long line shrinks instead of wrapping right round
-    long_lay = engine._layout(r, s, dict(o, line2="Sunshine Room Preschool Class of 2026"), "Annabelle Montgomery")
-    assert long_lay["arc"][1] < 0.3
+    long_lay = engine._layout(r, s, dict(o, tsize=0.7, line2="Sunshine Room Preschool Class of 2026"),
+                              "Annabelle Montgomery")
+    assert long_lay["arc"]["segments"][0][2] < 0.7
     # other shapes have no curve to follow: the lines go underneath
     square = engine._layout(r, s, dict(o, shape="square"), "Ava")
     assert square["arc"] is None and len(square["texts"]) == 2
@@ -259,3 +260,38 @@ def test_a_shape_too_big_for_the_ornament_is_reported():
     assert engine.on_ornament("x", r, s, {"orn": 3.0})["fits"]
     assert not engine.on_ornament("x", r, s, {"orn": 1.5})["fits"]
     assert not engine.on_ornament("x", r, s, {"orn": 3.0, "shape": "star"})["fits"]
+
+
+@needs_font
+def test_name_and_second_line_have_their_own_font_and_size():
+    keys = [f["key"] for f in engine.fonts()]
+    a, b = keys[0], keys[-1]
+    r, s = piece()
+    o = {"name_on": True, "line2": "2026", "font": a, "tsize": 0.34, "font2": b, "tsize2": 0.18, "orn": 4.0}
+    (t1, s1, _, base1, f1), (t2, s2, _, base2, f2) = engine._layout(r, s, o, "Ava", framed=True)["texts"]
+    assert (t1, s1, f1) == ("Ava", 0.34, a) and (t2, s2, f2) == ("2026", 0.18, b) and base2 > base1
+    # left alone, the second line uses the name's font, a little smaller
+    (_, s1, _, _, f1), (_, s2, _, _, f2) = engine._layout(r, s, {"name_on": True, "line2": "2026", "font": a, "tsize": 0.3,
+                                                                "orn": 4.0}, "Ava", framed=True)["texts"]
+    assert f2 == f1 == a and s2 == pytest.approx(0.24)
+    # curved: both parts keep their own font and their sizes stay in proportion when squeezed
+    arc = engine._layout(r, s, dict(o, place="arc", orn=3.0, tsize=0.6, tsize2=0.3), "Annabelle Montgomery")["arc"]
+    (_, fa, sa), (_, fb, sb) = arc["segments"]
+    assert (fa, fb) == (a, b) and sa < 0.6 and sa / sb == pytest.approx(2.0, rel=0.01)
+    if len(keys) > 1:  # a different font really gives different letters
+        same = engine.svg_single(r, s, "Ava", dict(o, font2=a))
+        assert engine.svg_single(r, s, "Ava", o) != same
+
+
+@needs_font
+def test_fonts_are_listed_by_name_and_old_choices_still_work():
+    fonts = engine.fonts()
+    labels = [f["label"] for f in fonts]
+    assert labels == sorted(labels, key=str.lower) and len(set(labels)) == len(labels)
+    assert all(set(f) == {"key", "label", "suggested"} for f in fonts)
+    keys = {f["key"] for f in fonts}
+    for old in ("serif", "sans", "bold", "script", "not a font", None, ""):
+        assert engine.resolve_font(old) in keys  # always something usable
+    assert engine.resolve_font(fonts[-1]["key"]) == fonts[-1]["key"]
+    for f in fonts[:: max(1, len(fonts) // 12)]:  # a spread of them can all letter a name
+        assert len(engine.text_d("Ava 2026", f["key"], 20.0, 0.0, 0.0)) > 50

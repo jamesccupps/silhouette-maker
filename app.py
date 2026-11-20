@@ -217,8 +217,10 @@ def _export_opts() -> dict:
             "name_on": a.get("name_on") == "1" or a.get("text") in ("name", "both"),
             "line2": (a.get("line2") or "")[:40],
             "place": "arc" if a.get("place") == "arc" else "below",
-            "font": a.get("font") if a.get("font") in engine.FONTS else "serif",
-            "tsize": _num(a.get("tsize"), 0.08, 2.0, 0.3)}
+            "font": (a.get("font") or "serif")[:120],  # the engine falls back when it is not a font here
+            "tsize": _num(a.get("tsize"), 0.08, 2.0, 0.3),
+            "font2": (a.get("font2") or "")[:120] or None,  # none: the same as the name
+            "tsize2": _num(a.get("tsize2"), 0.08, 2.0, 0.0) or None}
 
 
 def _colour(value, default: str) -> str:
@@ -505,7 +507,10 @@ def forget_photo(item_id):
 
 @app.get("/api/fonts")
 def list_fonts():
-    return jsonify(engine.fonts())
+    """Every font on this computer that can letter a name, and what the
+    choices of earlier versions map to."""
+    return jsonify({"fonts": engine.fonts(), "default": engine.resolve_font("serif"),
+                    "old": {k: engine.resolve_font(k) for k in ("serif", "sans", "bold", "script")}})
 
 
 PROOF_CSS = """
@@ -645,5 +650,6 @@ if __name__ == "__main__":
     DATA.mkdir(exist_ok=True)
     if "--no-browser" not in sys.argv:
         threading.Timer(1.0, lambda: webbrowser.open(f"http://127.0.0.1:{PORT}/")).start()
+    threading.Thread(target=engine.fonts, daemon=True).start()  # look through the fonts while the page opens
     print(f"Silhouette Maker is running at http://127.0.0.1:{PORT}/  (close this window to stop)")
     app.run(host="127.0.0.1", port=PORT, threaded=True)

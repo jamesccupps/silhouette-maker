@@ -307,15 +307,22 @@ def test_restore_ignores_anything_that_is_not_ours(client):
 
 
 def test_fonts_and_lettering_in_exports(client):
-    fonts = client.get("/api/fonts", base_url=BASE).get_json()
+    listing = client.get("/api/fonts", base_url=BASE).get_json()
+    fonts = listing["fonts"]
     if not fonts:
         pytest.skip("no usable font on this computer")
+    assert listing["default"] in {f["key"] for f in fonts} and set(listing["old"]) == {"serif", "sans", "bold", "script"}
     it = add(client)
     url = f"/api/items/{it['id']}/export.svg"
     plain = client.get(url, base_url=BASE).data
     named = client.get(url + f"?text=both&line2=2026&font={fonts[0]['key']}&tsize=0.3", base_url=BASE).data
     assert named.count(b"<path") == plain.count(b"<path") + 1
     assert client.get(url + "?text=nonsense&font=nope&tsize=huge", base_url=BASE).data == plain
+    two = client.get(url + f"?name_on=1&line2=2026&font={fonts[0]['key']}&tsize=0.3&font2={fonts[-1]['key']}&tsize2=0.15",
+                     base_url=BASE).data
+    assert two.count(b"<path") == plain.count(b"<path") + 1 and (two != named or len(fonts) == 1)
+    odd = client.get(url + "?name_on=1&font=../../etc/passwd&font2=%00&tsize2=nan", base_url=BASE)
+    assert odd.status_code == 200 and odd.data.count(b"<path") == plain.count(b"<path") + 1  # falls back to a real font
     png = client.get(f"/api/items/{it['id']}/export.png?text=name", base_url=BASE)
     assert png.status_code == 200
 
@@ -347,7 +354,7 @@ def test_preview_is_drawn_like_the_files(client):
     assert "<polygon" in heart["html"]
     bad = client.get(url + "?shape=dodecahedron&fg=red&bg=javascript:alert(1)", base_url=BASE).get_json()
     assert "<ellipse" in bad["html"] and "javascript" not in bad["html"] and "red" not in bad["html"]
-    if client.get("/api/fonts", base_url=BASE).get_json():
+    if client.get("/api/fonts", base_url=BASE).get_json()["fonts"]:
         named = client.get(url + "?name_on=1&name=Ava%20Typed%20Just%20Now&line2=2026", base_url=BASE).get_json()
         assert named["html"].count("<path") == r["html"].count("<path") + 1  # the unsaved name is used
 

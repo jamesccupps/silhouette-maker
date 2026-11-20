@@ -122,7 +122,10 @@ writes the files, so it shows exactly what you will get, and it says so when the
 silhouette is too big for the ornament.
 
 Under **Lettering**, tick **Put the name on it** and, if you like, type a
-**Second line** (the year, a class name). The letters can sit straight under the
+**Second line** (the year, a class name). The name and the second line each have
+their own font and size, and every font installed on the computer is offered,
+with a few that cut well suggested at the top; install a new font in Windows,
+restart the app, and it is in the list. The letters can sit straight under the
 silhouette or, on a round ornament, curve along the bottom edge. A long name
 wraps onto two lines and then shrinks, so it never runs off the ornament. Photos
 straight from a camera (IMG_2041…) come in without a name; type one in the
