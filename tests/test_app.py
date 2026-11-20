@@ -230,3 +230,91 @@ def test_sheet_is_laid_out_for_the_chosen_mat(client):
     assert 'width="4.2500in" height="11.7500in"' in joy and n_joy > 1
     assert 'width="11.5000in" height="23.5000in"' in long_mat and n_long == 1
     assert long_mat.count("<path") == 12
+
+
+def test_proof_sheet_shows_every_child_at_real_size(client):
+    add(client, name="Ava <b>.jpg")
+    add(client, name="Ben.jpg")
+    r = client.get("/proof?orn=3", base_url=BASE)
+    page = r.data.decode()
+    assert r.status_code == 200 and page.count("<figure>") == 2
+    assert 'width="3.0000in" height="3.0000in"' in page and "stroke-dasharray" in page
+    assert "Ava &lt;b&gt;" in page and "<b>" not in page  # names cannot inject markup
+    assert "2.25 in tall" in page and "/static/proof.js" in page and "<script>" not in page
+    assert client.get("/proof?ids=000000000000", base_url=BASE).status_code == 404
+
+
+def test_deleting_the_photo_keeps_the_silhouette(client):
+    it = add(client)
+    url = f"/api/items/{it['id']}"
+    d = server.DATA / it["id"]
+    client.get(url + "/thumb", base_url=BASE)
+    r = client.post(url + "/forget", base_url=BASE).get_json()
+    assert r["photo"] is False and r["outline"] == it["outline"]
+    assert not (d / "photo.jpg").exists() and not (d / "thumb.jpg").exists() and (d / "mask.png").exists()
+    assert client.get(url + "/photo", base_url=BASE).status_code == 404
+    assert client.get(url + "/thumb", base_url=BASE).status_code == 404
+    assert client.get(url + "/export.svg", base_url=BASE).status_code == 200  # still exports
+    assert client.post(url + "/redo", base_url=BASE, json={}).status_code == 409
+    assert client.post(url + "/reset", base_url=BASE, json={}).status_code == 200  # the starting shape is kept
+    turned = client.post(url + "/rotate", base_url=BASE, json={"turns": 1}).get_json()
+    assert (turned["w"], turned["h"]) == (it["h"], it["w"])
+    (d / "start.png").unlink()
+    assert client.post(url + "/reset", base_url=BASE, json={}).status_code == 409
+
+
+def test_backup_and_restore_round_trip(client, tmp_path, monkeypatch):
+    a, b = add(client), add(client, name="Ben.jpg")
+    client.patch(f"/api/items/{a['id']}", base_url=BASE, json={"name": "Ava B", "done": True,
+                                                               "settings": {"height_in": 3, "flip": True}})
+    client.post(f"/api/items/{b['id']}/forget", base_url=BASE)
+    before = client.get("/api/items", base_url=BASE).get_json()
+    zipped = client.get("/api/backup", base_url=BASE)
+    assert zipped.mimetype == "application/zip" and "silhouette-maker-backup-" in zipped.headers["Content-Disposition"]
+
+    def restore(data):
+        return client.post("/api/restore", base_url=BASE, data={"backup": (io.BytesIO(data), "backup.zip")},
+                           content_type="multipart/form-data")
+
+    assert restore(zipped.data).get_json() == {"added": 0, "skipped": 2}  # nothing is overwritten
+
+    monkeypatch.setattr(server, "DATA", tmp_path / "another-computer")
+    server._cache.clear()
+    server._outlines.clear()
+    assert restore(zipped.data).get_json() == {"added": 2, "skipped": 0}
+    after = client.get("/api/items", base_url=BASE).get_json()
+    strip = lambda items: [{k: v for k, v in it.items()} for it in items]
+    assert strip(after) == strip(before)
+    assert not list((tmp_path / "another-computer").glob(".restore-*"))
+
+
+def test_restore_ignores_anything_that_is_not_ours(client):
+    assert client.post("/api/restore", base_url=BASE, data={"backup": (io.BytesIO(b"not a zip"), "x.zip")},
+                       content_type="multipart/form-data").status_code == 400
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("../../evil.txt", "x")
+        z.writestr("aaaaaaaaaaaa/../../evil2.txt", "x")
+        z.writestr("bbbbbbbbbbbb/meta.json", "{}")  # no mask
+        z.writestr("cccccccccccc/meta.json", '{"name": "x", "settings": {}}')
+        z.writestr("cccccccccccc/mask.png", b"not a picture")
+        z.writestr("readme.txt", "hello")
+    r = client.post("/api/restore", base_url=BASE, data={"backup": (io.BytesIO(buf.getvalue()), "x.zip")},
+                    content_type="multipart/form-data")
+    assert r.get_json() == {"added": 0, "skipped": 0}
+    assert client.get("/api/items", base_url=BASE).get_json() == []
+    assert not (server.DATA.parent / "evil.txt").exists() and not (server.DATA.parent.parent / "evil.txt").exists()
+
+
+def test_fonts_and_lettering_in_exports(client):
+    fonts = client.get("/api/fonts", base_url=BASE).get_json()
+    if not fonts:
+        pytest.skip("no usable font on this computer")
+    it = add(client)
+    url = f"/api/items/{it['id']}/export.svg"
+    plain = client.get(url, base_url=BASE).data
+    named = client.get(url + f"?text=both&line2=2026&font={fonts[0]['key']}&tsize=0.3", base_url=BASE).data
+    assert named.count(b"<path") == plain.count(b"<path") + 1
+    assert client.get(url + "?text=nonsense&font=nope&tsize=huge", base_url=BASE).data == plain
+    png = client.get(f"/api/items/{it['id']}/export.png?text=name", base_url=BASE)
+    assert png.status_code == 200

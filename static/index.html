@@ -31,7 +31,8 @@ h1{font-size:16px;margin:0 0 2px}
 .kid.sel{background:var(--panel2);border-color:var(--accent)}
 .kid svg{width:44px;height:44px;background:#f4efe6;border-radius:6px;flex:none}
 .kid span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#left footer{padding:12px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:6px}
+#left footer{padding:10px 12px;border-top:1px solid var(--line);display:flex;gap:6px}
+#left footer button{flex:1}
 main{display:flex;flex-direction:column;min-width:0;min-height:0;position:relative}
 #bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 10px;background:var(--panel);border-bottom:1px solid var(--line)}
 #bar .sep{width:1px;height:22px;background:var(--line);margin:0 4px}
@@ -92,6 +93,11 @@ body.home #right{display:none}
     <input type="file" id="file" accept="image/*,.heic,.heif" multiple hidden>
   </header>
   <div id="list"></div>
+  <footer>
+    <button id="backupBtn" title="Save everything (photos, silhouettes, settings) as one zip file. It contains the photos, so keep it somewhere private.">Back up</button>
+    <button id="restoreBtn" title="Add the photos from a backup file. Photos already here are left alone.">Restore</button>
+    <input type="file" id="restoreFile" accept=".zip" hidden>
+  </footer>
 </aside>
 
 <main>
@@ -156,6 +162,8 @@ body.home #right{display:none}
         </select>
         <button id="gSheet" title="Children together on sheets the size chosen on the left, to save material"></button>
         <button id="gDone" title="Mark the selected ones finished, or not finished"></button>
+        <button id="gProof" title="A page to print on plain paper: every silhouette at its real size on its ornament, with names. Check likeness and fit before cutting.">Proof sheet</button>
+        <button id="gForget" class="danger" title="Delete the original photos of the selected children and keep their silhouettes"></button>
         <button id="gDel" class="danger"></button>
       </div>
       <div id="grid"></div>
@@ -184,6 +192,16 @@ body.home #right{display:none}
       <label class="field" style="flex:1.4"><span>Around the shape</span><select id="border"><option value="none">Nothing</option><option value="rect">Box</option><option value="circle">Ornament circle</option></select></label>
       <label class="field" style="flex:1"><span>Space (in)</span><input type="number" id="space" min="0" max="6" step="0.05"></label>
     </div>
+    <div id="textRows" class="stack" style="gap:14px" title="Lettering under the silhouette, as its own layer in the SVG and on the proof sheet. The preview above is approximate; the files use the real letter shapes. Not included in the PNG.">
+      <div class="row">
+        <label class="field" style="flex:1.4"><span>Text under it</span><select id="text"><option value="none">None</option><option value="name">Name</option><option value="both">Name + line below</option></select></label>
+        <label class="field" style="flex:1"><span>Line below</span><input type="text" id="line2" maxlength="30" placeholder="2026"></label>
+      </div>
+      <div class="row" id="textMore">
+        <label class="field" style="flex:1.4"><span>Lettering</span><select id="font"></select></label>
+        <label class="field" style="flex:1"><span>Letter size (in)</span><input type="number" id="tsize" min="0.1" max="2" step="0.05"></label>
+      </div>
+    </div>
     <div class="stack">
       <button class="primary" id="svgBtn">Download SVG for Cricut</button>
       <button id="pngBtn">Download PNG</button>
@@ -193,7 +211,8 @@ body.home #right{display:none}
         <select id="quality"><option value="best">Best cut-out (slower)</option><option value="fast">Fast cut-out</option></select>
         <button id="redo" title="Run the automatic cut-out again with the model chosen here">Cut out again</button>
       </div>
-      <button class="danger" id="del">Delete this photo</button>
+      <button id="forget" title="For privacy once you are done: the original photo is deleted, the silhouette stays. It cannot be cut out again afterwards.">Delete the photo, keep the silhouette</button>
+      <button class="danger" id="del">Delete photo and silhouette</button>
     </div>
   </div>
 </aside>

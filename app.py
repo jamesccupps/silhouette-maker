@@ -1,12 +1,14 @@
 """Silhouette Maker: local server. Listens on this computer only (127.0.0.1)."""
 from __future__ import annotations
 
+import html
 import io
 import json
 import math
 import re
 import shutil
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -21,7 +23,7 @@ from PIL import Image
 
 import engine
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 ROOT = Path(__file__).resolve().parent
 
 
@@ -48,6 +50,8 @@ def _local_only():
     # Only this computer's own browser page may talk to the app.
     if request.host not in ALLOWED_HOSTS:
         abort(403)
+    if request.path == "/api/restore":  # a backup of a whole class is bigger than one photo
+        request.max_content_length = 4 * 1024**3
     origin = request.headers.get("Origin")
     if origin and origin.split("://", 1)[-1] not in ALLOWED_HOSTS:
         abort(403)
@@ -174,6 +178,7 @@ def _items() -> list[tuple[Path, dict]]:
 def _public(d: Path, meta: dict) -> dict:
     return {"id": d.name, "name": meta["name"], "w": meta["w"], "h": meta["h"],
             "done": bool(meta.get("done")), "added": _added(d, meta), "rev": meta.get("rev", 0),
+            "photo": (d / "photo.jpg").exists(),
             "settings": meta["settings"], "outline": _outline_json(d, meta)}
 
 
@@ -205,7 +210,31 @@ def _export_opts() -> dict:
     border = a.get("border", "none")
     return {"border": border if border in ("none", "rect", "circle") else "none",
             "space": _num(a.get("space"), 0.0, 6.0, 0.0),
-            "orn": _num(a.get("orn"), 0.5, 24.0, 3.0)}
+            "orn": _num(a.get("orn"), 0.5, 24.0, 3.0),
+            "text": a.get("text") if a.get("text") in ("name", "both") else "none",
+            "line2": (a.get("line2") or "")[:30],
+            "font": a.get("font") if a.get("font") in engine.FONTS else "serif",
+            "tsize": _num(a.get("tsize"), 0.1, 2.0, 0.3)}
+
+
+NO_PHOTO = "The photo was deleted, so it cannot be cut out again."
+
+
+def _merge_settings(cur: dict, s) -> dict:
+    """Copy the valid parts of s (from the page, or a backup) into cur."""
+    s = s if isinstance(s, dict) else {}
+    for k, lo, hi in (("height_in", 0.25, 24.0), ("smooth", 0.0, 10.0),
+                      ("tilt_deg", -45.0, 45.0), ("detail_mm", 0.0, 3.0)):
+        if k in s:
+            cur[k] = _num(s[k], lo, hi, cur.get(k, engine.DEFAULT_SETTINGS[k]))
+    for k in ("flip", "cut_on"):
+        if k in s:
+            cur[k] = bool(s[k])
+    cut = s.get("cut")
+    if isinstance(cut, list) and len(cut) == 3 and all(isinstance(p, list) and len(p) == 2 for p in cut):
+        # the middle point is a pull point and may sit a little outside the photo
+        cur["cut"] = [[_num(p[0], -2.0, 3.0, 0.5), _num(p[1], -2.0, 3.0, 0.9)] for p in cut]
+    return cur
 
 
 @app.get("/")
@@ -249,13 +278,18 @@ def add_item():
 
 @app.get("/api/items/<item_id>/photo")
 def get_photo(item_id):
-    return send_file(_dir(item_id) / "photo.jpg", mimetype="image/jpeg")
+    f = _dir(item_id) / "photo.jpg"
+    if not f.exists():
+        abort(404)
+    return send_file(f, mimetype="image/jpeg")
 
 
 @app.get("/api/items/<item_id>/thumb")
 def get_thumb(item_id):
     d = _dir(item_id)
     t = d / "thumb.jpg"
+    if not (d / "photo.jpg").exists():
+        abort(404)
     if not t.exists():
         img = Image.open(d / "photo.jpg")
         img.thumbnail((420, 420), Image.LANCZOS)
@@ -288,6 +322,8 @@ def redo_cutout(item_id):
     """Run the model again (throws away brush edits)."""
     d = _dir(item_id)
     meta = _meta(d)
+    if not (d / "photo.jpg").exists():
+        return jsonify({"error": NO_PHOTO}), 409
     quality = (request.get_json(silent=True) or {}).get("quality", "best")
     try:
         mask, note = _cut_out(Image.open(d / "photo.jpg").convert("RGB"), quality)
@@ -306,6 +342,8 @@ def reset_item(item_id):
     note = ""
     if (d / "start.png").exists():
         mask = np.asarray(Image.open(d / "start.png").convert("L"))
+    elif not (d / "photo.jpg").exists():
+        return jsonify({"error": NO_PHOTO}), 409
     else:  # added before the app kept a starting copy: make the cut-out again
         quality = (request.get_json(silent=True) or {}).get("quality", "best")
         try:
@@ -326,14 +364,17 @@ def rotate_item(item_id):
     d = _dir(item_id)
     meta = _meta(d)
     turns = int(_num((request.get_json(silent=True) or {}).get("turns"), -3, 3, 1))
-    img, mask = engine.turn(Image.open(d / "photo.jpg").convert("RGB"), _mask(d), -turns)
-    img.save(d / "photo.jpg", quality=95)
+    if (d / "photo.jpg").exists():
+        img, mask = engine.turn(Image.open(d / "photo.jpg").convert("RGB"), _mask(d), -turns)
+        img.save(d / "photo.jpg", quality=95)
+    else:  # the photo was deleted: the shape still turns
+        mask = np.ascontiguousarray(np.rot90(_mask(d), -turns % 4))
     Image.fromarray(mask).save(d / "mask.png")
     if (d / "start.png").exists():  # the starting copy turns with the photo
         start = np.rot90(np.asarray(Image.open(d / "start.png").convert("L")), -turns % 4)
         Image.fromarray(np.ascontiguousarray(start)).save(d / "start.png")
     (d / "thumb.jpg").unlink(missing_ok=True)
-    meta.update(w=img.width, h=img.height, rev=meta.get("rev", 0) + 1)
+    meta.update(w=mask.shape[1], h=mask.shape[0], rev=meta.get("rev", 0) + 1)
     meta["settings"]["cut"] = engine.default_cut(mask)
     _save_meta(d, meta)
     return jsonify(_public(d, meta))
@@ -350,20 +391,7 @@ def patch_item(item_id):
         meta["name"] = str(body["name"])[:60]
     if "done" in body:
         meta["done"] = bool(body["done"])
-    s = body.get("settings")
-    s = s if isinstance(s, dict) else {}
-    cur = meta["settings"]
-    for k, lo, hi in (("height_in", 0.25, 24.0), ("smooth", 0.0, 10.0),
-                      ("tilt_deg", -45.0, 45.0), ("detail_mm", 0.0, 3.0)):
-        if k in s:
-            cur[k] = _num(s[k], lo, hi, cur.get(k, engine.DEFAULT_SETTINGS[k]))
-    for k in ("flip", "cut_on"):
-        if k in s:
-            cur[k] = bool(s[k])
-    cut = s.get("cut")
-    if isinstance(cut, list) and len(cut) == 3 and all(isinstance(p, list) and len(p) == 2 for p in cut):
-        # the middle point is a pull point and may sit a little outside the photo
-        cur["cut"] = [[_num(p[0], -2.0, 3.0, 0.5), _num(p[1], -2.0, 3.0, 0.9)] for p in cut]
+    _merge_settings(meta["settings"], body.get("settings"))
     _save_meta(d, meta)
     return jsonify(_public(d, meta))
 
@@ -447,6 +475,129 @@ def export_zip():
     buf.seek(0)
     return send_file(buf, mimetype="application/zip", as_attachment=True,
                      download_name="silhouettes.zip")
+
+
+@app.post("/api/items/<item_id>/forget")
+def forget_photo(item_id):
+    """Delete the original photo and keep the silhouette."""
+    d = _dir(item_id)
+    meta = _meta(d)
+    for f in ("photo.jpg", "thumb.jpg"):
+        (d / f).unlink(missing_ok=True)
+    return jsonify(_public(d, meta))
+
+
+@app.get("/api/fonts")
+def list_fonts():
+    return jsonify(engine.fonts())
+
+
+PROOF_CSS = """
+body{font:14px/1.4 "Segoe UI",system-ui,sans-serif;color:#111;margin:0.4in}
+header{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:0.2in}
+h1{font-size:18px;margin:0}
+.rule{width:2in;height:0.12in;background:#111}
+.note{color:#444;font-size:12px}
+main{display:flex;flex-wrap:wrap;gap:0.15in}
+figure{margin:0;text-align:center;break-inside:avoid}
+figure svg{display:block}
+figcaption{font-size:12px}
+@media print{button{display:none}body{margin:0}}
+@page{margin:0.5in}
+"""
+
+
+@app.get("/proof")
+def proof_sheet():
+    """A page to print on plain paper: every shape at its real size, on its ornament."""
+    items = _chosen()
+    if not items:
+        abort(409)
+    o = dict(_export_opts(), border="circle")  # centred on the ornament, as it will be stuck on
+    u, figs = engine.UNITS_PER_INCH, []
+    for name, res, settings in items:
+        side = engine.layout(res, settings, o, name)[0]
+        body = (f'<circle cx="{side / 2 * u:.2f}" cy="{side / 2 * u:.2f}" r="{o["orn"] / 2 * u:.2f}" fill="none" '
+                f'stroke="#888" stroke-width="0.75" stroke-dasharray="4 3"/>\n'
+                + engine.piece_svg(name, res, settings, o, 0.0, 0.0, border=False))
+        figs.append(f'<figure><svg xmlns="http://www.w3.org/2000/svg" width="{side:.4f}in" height="{side:.4f}in" '
+                    f'viewBox="0 0 {side * u:.2f} {side * u:.2f}">{body}</svg>'
+                    f'<figcaption>{html.escape(name)} &middot; {engine.size_in(res, settings)[1]:.2f} in tall</figcaption></figure>')
+    page = (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Silhouette proof sheet</title>'
+            f'<style>{PROOF_CSS}</style></head><body><header><h1>Proof sheet</h1><button id="print">Print</button>'
+            f'<div class="rule"></div><div class="note">Print at 100% (&ldquo;Actual size&rdquo;, not &ldquo;Fit&rdquo;). '
+            f'The black bar should measure exactly 2 inches. Dashed circles are the {o["orn"]:g} in ornament.</div></header>'
+            f'<main>{"".join(figs)}</main><script src="/static/proof.js"></script></body></html>')
+    return page
+
+
+BACKUP_FILES = ("meta.json", "mask.png", "start.png", "photo.jpg")
+
+
+@app.get("/api/backup")
+def backup():
+    """Everything, as one zip: photos, shapes and settings."""
+    buf = tempfile.SpooledTemporaryFile(max_size=64 * 1024 * 1024)
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:  # the pictures are already compressed
+        for d, _meta_ in _items():
+            for f in BACKUP_FILES:
+                if (d / f).exists():
+                    z.write(d / f, f"{d.name}/{f}")
+    buf.seek(0)
+    return send_file(buf, mimetype="application/zip", as_attachment=True,
+                     download_name=f"silhouette-maker-backup-{time.strftime('%Y-%m-%d')}.zip")
+
+
+@app.post("/api/restore")
+def restore():
+    """Add the photos from a backup zip. Ones already here are left alone."""
+    f = request.files.get("backup")
+    if not f:
+        abort(400)
+    try:
+        z = zipfile.ZipFile(f.stream)
+    except zipfile.BadZipFile:
+        return jsonify({"error": "That file is not a Silhouette Maker backup."}), 400
+    groups: dict[str, dict] = {}
+    for info in z.infolist():  # only our own file names, so nothing can land outside the data folder
+        m = re.fullmatch(r"([0-9a-f]{12})/(meta\.json|mask\.png|start\.png|photo\.jpg)", info.filename)
+        if m and info.file_size <= 60 * 1024 * 1024:
+            groups.setdefault(m.group(1), {})[m.group(2)] = info
+    added = skipped = 0
+    DATA.mkdir(exist_ok=True)
+    for item_id, files in groups.items():
+        if "meta.json" not in files or "mask.png" not in files:
+            continue
+        if (DATA / item_id).exists():
+            skipped += 1
+            continue
+        try:
+            old = json.loads(z.read(files["meta.json"]))
+            mask = Image.open(io.BytesIO(z.read(files["mask.png"]))).convert("L")
+            arr = np.where(np.asarray(mask) > 127, 255, 0).astype(np.uint8)
+            meta = {"name": str(old["name"])[:60], "w": mask.width, "h": mask.height,
+                    "done": bool(old.get("done")), "rev": int(_num(old.get("rev"), 0, 1e9, 0)),
+                    "added": _num(old.get("added"), 0, 1e11, time.time()),
+                    "settings": _merge_settings(dict(engine.DEFAULT_SETTINGS, cut=engine.default_cut(arr)),
+                                                old.get("settings"))}
+            extra = {}
+            for name in ("start.png", "photo.jpg"):
+                if name in files:
+                    img = Image.open(io.BytesIO(z.read(files[name])))
+                    if img.size == mask.size:  # a picture of the wrong size is not this child's
+                        extra[name] = img.convert("L" if name == "start.png" else "RGB")
+        except Exception:
+            continue  # not one of ours, or damaged: skip it
+        tmp = DATA / f".restore-{item_id}"
+        shutil.rmtree(tmp, ignore_errors=True)
+        tmp.mkdir()
+        Image.fromarray(arr).save(tmp / "mask.png")
+        for name, img in extra.items():
+            img.save(tmp / name, **({"quality": 95} if name.endswith(".jpg") else {}))
+        _save_meta(tmp, meta)
+        tmp.rename(DATA / item_id)
+        added += 1
+    return jsonify({"added": added, "skipped": skipped})
 
 
 if __name__ == "__main__":

@@ -36,6 +36,11 @@ ornament.
   all, or everyone packed onto mat-sized sheets.
 - **Files for Cricut Design Space**: SVG at true size, optional box or ornament
   circle as its own layer, and PNG.
+- **Names**: the child's name, and a second line such as the year, under the
+  silhouette as its own layer.
+- **Proof sheet**: print everyone at real size on plain paper before cutting.
+- **Privacy tools**: delete the original photos once you are done and keep only
+  the silhouettes; back up and restore everything as one file.
 
 ## Install (Windows)
 
@@ -46,6 +51,9 @@ to 3.13.
 2. Double-click **Start Silhouette Maker.bat**. The first run sets itself up
    (a few minutes), then a page opens in your browser.
 3. To stop the app, close the black window.
+
+Double-click **Add desktop shortcut.bat** once to get a Silhouette Maker icon on
+your Desktop.
 
 **Best** cut-out quality uses the graphics card (any DirectX 12 card; about
 15 seconds a photo on an RTX 3060). If it can't run on your PC, the app says so
@@ -106,6 +114,30 @@ otherwise the app falls back to *Fast*.
 them, use them as a size guide, or delete them. Blank space on its own only
 shows in the PNG, because Design Space ignores empty space in an SVG.
 
+**Text under it** adds the child's name, or the name and a line below (the
+year, a class name), in one of four lettering styles. It is written as outlines,
+not as text, because Design Space ignores text in an uploaded SVG; it arrives as
+its own layer, so you can cut it, draw it with a pen, or delete it. The preview
+in the app is approximate; the files use the real letter shapes. Small cut
+letters are hard to weed, so try the proof sheet first.
+
+### Before you cut: the proof sheet
+
+**Proof sheet** in the gallery opens a page with every silhouette at its real
+size, sitting on a dashed circle the size of your ornament, with names. Print it
+at 100% ("Actual size", not "Fit"); the black bar at the top should measure
+exactly 2 inches. Check likeness and fit on paper before using vinyl.
+
+### When you are finished
+
+- **Delete the photo, keep the silhouette** (in the editor), or tick children in
+  the gallery and use **Delete photos only**. The original photo is removed from
+  the computer; the silhouette, its settings and the cut files stay. It cannot be
+  cut out again afterwards.
+- **Back up** (bottom left) saves everything as one zip: photos, silhouettes,
+  settings. It contains the photos, so keep it somewhere private. **Restore**
+  adds the children from a backup file and leaves the ones already here alone.
+
 ### In Cricut Design Space
 
 **Upload → the SVG → add to canvas.** The file is written in the units Design
@@ -131,7 +163,7 @@ On a sheet, each shape carries the child's name in the layers panel.
 - `app.py`: the local server. `--port N` and `--data FOLDER` run a second copy
   for testing without touching real photos.
 - `static/`: the page. No build step.
-- `tools/make_samples.py` draws the sample profiles.
+- `tools/make_samples.py` draws the sample profiles; `tools/make_icon.py` the icon.
 
 Please never put a real child's photo in an issue, a pull request or a test.
 
@@ -140,6 +172,7 @@ Please never put a real child's photo in an issue, a pull request or a test.
 - [rembg](https://github.com/danielgatis/rembg) (MIT) runs the cut-out models.
 - [BiRefNet](https://github.com/ZhengPeng7/BiRefNet) (MIT), the *Best* model.
 - [U²-Net](https://github.com/xuebinqin/U-2-Net) (Apache 2.0), the *Fast* model.
+- [fontTools](https://github.com/fonttools/fonttools) (MIT) reads the letter shapes.
 - [ONNX Runtime](https://onnxruntime.ai/), [OpenCV](https://opencv.org/),
   [scikit-image](https://scikit-image.org/), [Pillow](https://python-pillow.org/),
   [NumPy](https://numpy.org/) and [Flask](https://flask.palletsprojects.com/).

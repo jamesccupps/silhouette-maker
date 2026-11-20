@@ -6,7 +6,10 @@ one-time download of the model file itself; photos are never sent anywhere.
 from __future__ import annotations
 
 import gc
+import os
 import threading
+from functools import lru_cache
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -339,57 +342,182 @@ def _xml(text: str) -> str:
 
 
 BORDER_FILL = "#d9b27c"
+TEXT_FILL = "#3a3a3a"
+TEXT_GAP = 0.12  # inches between the shape and the first line of text
+
+# ---- lettering -------------------------------------------------------------
+# Design Space ignores <text> in an uploaded SVG, so names are written as
+# outlines, traced from a font that is already on this computer.
+FONTS = {  # key: (label, CSS for the on-screen preview, font files tried in order)
+    "serif": ("Serif", "font-family:Georgia,'Times New Roman',serif",
+              ["georgia.ttf", "times.ttf", "DejaVuSerif.ttf", "LiberationSerif-Regular.ttf", "Georgia.ttf"]),
+    "sans": ("Plain", "font-family:Arial,Helvetica,sans-serif",
+             ["arial.ttf", "segoeui.ttf", "DejaVuSans.ttf", "LiberationSans-Regular.ttf", "Arial.ttf"]),
+    "bold": ("Bold", "font-family:Arial,Helvetica,sans-serif;font-weight:bold",
+             ["arialbd.ttf", "segoeuib.ttf", "DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf", "Arial Bold.ttf"]),
+    "script": ("Handwriting", "font-family:'Segoe Script','Comic Sans MS',cursive",
+               ["segoesc.ttf", "segoepr.ttf", "comic.ttf", "Comic Sans MS.ttf"]),
+}
 
 
+def _font_dirs() -> list[Path]:
+    dirs = [Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts", Path("/usr/share/fonts"),
+            Path("/Library/Fonts"), Path("/System/Library/Fonts/Supplemental"), Path.home() / ".fonts"]
+    return [d for d in dirs if d.is_dir()]
+
+
+@lru_cache(maxsize=None)
+def font_file(key: str):
+    """Path of the font for this choice, or None when it is not on this computer."""
+    if key not in FONTS:
+        return None
+    try:
+        import fontTools  # noqa: F401
+    except ImportError:
+        return None
+    names = FONTS[key][2]
+    for d in _font_dirs():
+        for n in names:
+            if (d / n).is_file():
+                return d / n
+    for d in _font_dirs():  # Linux keeps fonts in sub-folders
+        for n in names:
+            hit = next(d.rglob(n), None)
+            if hit:
+                return hit
+    return None
+
+
+def fonts() -> list[dict]:
+    """The lettering choices that work here."""
+    return [{"key": k, "label": v[0], "css": v[1]} for k, v in FONTS.items() if font_file(k)]
+
+
+@lru_cache(maxsize=None)
+def _font(key: str):
+    from fontTools.ttLib import TTFont
+
+    return TTFont(str(font_file(key)), lazy=True)
+
+
+def _run(text: str, key: str):
+    """([(glyph name, x in font units)], total width in font units, units per em)."""
+    font = _font(key)
+    cmap, hmtx = font.getBestCmap(), font["hmtx"]
+    out, x = [], 0
+    for ch in text:
+        g = cmap.get(ord(ch)) or cmap.get(ord("?")) or ".notdef"
+        out.append((g, x))
+        x += hmtx[g][0]
+    return out, x, font["head"].unitsPerEm
+
+
+def text_width_em(text: str, key: str) -> float:
+    _, w, upm = _run(text, key)
+    return w / upm
+
+
+def text_d(text: str, key: str, size: float, cx: float, baseline: float) -> str:
+    """Path data for text as outlines: letters `size` tall (the em), centred on
+    cx, sitting on `baseline`, all in the output's units."""
+    from fontTools.pens.svgPathPen import SVGPathPen
+    from fontTools.pens.transformPen import TransformPen
+
+    glyphs = _font(key).getGlyphSet()
+    run, w, upm = _run(text, key)
+    k = size / upm
+    x0 = cx - w * k / 2
+    pen = SVGPathPen(glyphs, ntos=lambda v: f"{v:.2f}")
+    for g, x in run:
+        glyphs[g].draw(TransformPen(pen, (k, 0, 0, -k, x0 + x * k, baseline)))
+    return pen.getCommands()
+
+
+# ---- pieces ----------------------------------------------------------------
 def _opts(opts) -> dict:
-    """border: none | rect | circle; space: blank inches around the shape;
-    orn: the ornament's diameter, used by the circle."""
-    return {"border": "none", "space": 0.0, "orn": 3.0, **(opts or {})}
+    """border: none | rect | circle; space: blank inches around; orn: ornament
+    diameter (for the circle); text: none | name | both (name + line2);
+    font: a key of FONTS; tsize: letter size in inches."""
+    return {"border": "none", "space": 0.0, "orn": 3.0,
+            "text": "none", "line2": "", "font": "serif", "tsize": 0.3, **(opts or {})}
 
 
-def layout(result: dict, settings: dict, opts=None):
-    """(width, height, shape_x, shape_y) of one exported piece, in inches."""
+def _lines(name: str, o: dict) -> list[tuple[str, float]]:
+    """[(text, letter size in inches)] to put under the shape."""
+    if o["text"] not in ("name", "both") or not font_file(o["font"]):
+        return []
+    size, out = float(o["tsize"]), []
+    if name.strip():
+        out.append((name.strip(), size))
+    if o["text"] == "both" and str(o["line2"]).strip():
+        out.append((str(o["line2"]).strip(), size * 0.8))
+    return out
+
+
+def _layout(result: dict, settings: dict, opts, name: str):
+    """(width, height, shape_x, shape_y, [(text, size, centre_x, baseline_y)]) in inches."""
     o = _opts(opts)
     sw, sh = size_in(result, settings)
+    lines = _lines(name, o)
+    block = TEXT_GAP + sum(1.2 * size for _, size in lines) if lines else 0.0
+    cw = max([sw] + [text_width_em(t, o["font"]) * size for t, size in lines])
+    ch = sh + block
     if o["border"] == "circle":
-        side = max(float(o["orn"]), sw, sh)
-        return side, side, (side - sw) / 2, (side - sh) / 2
-    sp = max(0.0, float(o["space"]))
-    return sw + 2 * sp, sh + 2 * sp, sp, sp
+        w = h = max(float(o["orn"]), cw, ch)
+        left, top = (w - cw) / 2, (h - ch) / 2
+    else:
+        sp = max(0.0, float(o["space"]))
+        w, h, left, top = cw + 2 * sp, ch + 2 * sp, sp, sp
+    ox, oy = left + (cw - sw) / 2, top
+    texts, y = [], oy + sh + TEXT_GAP
+    for t, size in lines:
+        texts.append((t, size, left + cw / 2, y + 0.78 * size))
+        y += 1.2 * size
+    return w, h, ox, oy, texts
 
 
-def _piece_svg(name: str, result: dict, settings: dict, opts, x: float, y: float) -> str:
-    """One child at (x, y) inches: the border (its own layer, behind) then the shape."""
+def layout(result: dict, settings: dict, opts=None, name: str = ""):
+    """(width, height, shape_x, shape_y) of one exported piece, in inches."""
+    return _layout(result, settings, opts, name)[:4]
+
+
+def piece_svg(name: str, result: dict, settings: dict, opts, x: float, y: float, border: bool = True) -> str:
+    """One child at (x, y) inches: the border (its own layer, behind), the
+    shape, then any lettering (its own layer too)."""
     o, u = _opts(opts), UNITS_PER_INCH
-    w, h, ox, oy = layout(result, settings, o)
-    border = ""
-    if o["border"] == "circle":
-        border = (f'<circle cx="{(x + w / 2) * u:.2f}" cy="{(y + h / 2) * u:.2f}" r="{w / 2 * u:.2f}" '
-                  f'fill="{BORDER_FILL}"><title>{_xml(name)} border</title></circle>\n')
-    elif o["border"] == "rect":
-        border = (f'<rect x="{x * u:.2f}" y="{y * u:.2f}" width="{w * u:.2f}" height="{h * u:.2f}" '
-                  f'fill="{BORDER_FILL}"><title>{_xml(name)} border</title></rect>\n')
+    w, h, ox, oy, texts = _layout(result, settings, o, name)
+    out = ""
+    if border and o["border"] == "circle":
+        out = (f'<circle cx="{(x + w / 2) * u:.2f}" cy="{(y + h / 2) * u:.2f}" r="{w / 2 * u:.2f}" '
+               f'fill="{BORDER_FILL}"><title>{_xml(name)} border</title></circle>\n')
+    elif border and o["border"] == "rect":
+        out = (f'<rect x="{x * u:.2f}" y="{y * u:.2f}" width="{w * u:.2f}" height="{h * u:.2f}" '
+               f'fill="{BORDER_FILL}"><title>{_xml(name)} border</title></rect>\n')
     d = placed_d(result, settings, x + ox, y + oy)
-    return border + f'<path fill="#000000" fill-rule="evenodd" d="{d}"><title>{_xml(name)}</title></path>\n'
+    out += f'<path fill="#000000" fill-rule="evenodd" d="{d}"><title>{_xml(name)}</title></path>\n'
+    if texts:
+        td = "".join(text_d(t, o["font"], size * u, (x + cx) * u, (y + base) * u) for t, size, cx, base in texts)
+        out += f'<path fill="{TEXT_FILL}" d="{td}"><title>{_xml(name)} lettering</title></path>\n'
+    return out
 
 
 def svg_single(result: dict, settings: dict, name: str = "", opts=None) -> str:
-    w, h, _, _ = layout(result, settings, opts)
-    return _svg(w, h, _piece_svg(name, result, settings, opts, 0.0, 0.0))
+    w, h, _, _ = layout(result, settings, opts, name)
+    return _svg(w, h, piece_svg(name, result, settings, opts, 0.0, 0.0))
 
 
 def svg_sheets(items: list[tuple[str, dict, dict]], sheet_w=11.5, sheet_h=11.5,
                gap=0.2, opts=None) -> list[str]:
     """Pack (name, result, settings) onto as many sheets as needed, in rows."""
     sheets, body, x, y, row_h = [], [], 0.0, 0.0, 0.0
-    for name, result, settings in sorted(items, key=lambda it: -layout(it[1], it[2], opts)[1]):
-        w, h, _, _ = layout(result, settings, opts)
+    for name, result, settings in sorted(items, key=lambda it: -layout(it[1], it[2], opts, it[0])[1]):
+        w, h, _, _ = layout(result, settings, opts, name)
         if x > 0 and x + w > sheet_w:
             x, y, row_h = 0.0, y + row_h + gap, 0.0
         if y > 0 and y + h > sheet_h:
             sheets.append(_svg(sheet_w, sheet_h, "".join(body)))
             body, x, y, row_h = [], 0.0, 0.0, 0.0
-        body.append(_piece_svg(name, result, settings, opts, x, y))
+        body.append(piece_svg(name, result, settings, opts, x, y))
         x, row_h = x + w + gap, max(row_h, h)
     if body:
         sheets.append(_svg(sheet_w, sheet_h, "".join(body)))
@@ -397,11 +525,12 @@ def svg_sheets(items: list[tuple[str, dict, dict]], sheet_w=11.5, sheet_h=11.5,
 
 
 def png_cutout(result: dict, settings: dict, opts=None) -> Image.Image:
-    """Black shape on transparent (plus the border, if any), dpi set to the finished size."""
+    """Black shape on transparent (plus the border, if any), dpi set to the
+    finished size. Lettering is left out: it exists only as outlines in the SVG."""
     from PIL import ImageDraw
 
     s = {**DEFAULT_SETTINGS, **settings}
-    o = _opts(opts)
+    o = dict(_opts(opts), text="none")
     final = result["final"]
     tilt = float(s.get("tilt_deg") or 0.0)
     if tilt:

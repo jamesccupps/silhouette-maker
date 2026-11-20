@@ -4,7 +4,8 @@ const cv = $("cv"), ctx = cv.getContext("2d");
 const mask = document.createElement("canvas"), mctx = mask.getContext("2d", { willReadFrequently: true });
 const tint = document.createElement("canvas"), tctx = tint.getContext("2d");
 
-const prefs = Object.assign({ ornD: 3, height: 2.25, quality: "best", border: "none", space: 0, grid: false, mat: "11.5x11.5" }, readPrefs());
+const prefs = Object.assign({ ornD: 3, height: 2.25, quality: "best", border: "none", space: 0, grid: false, mat: "11.5x11.5", text: "none", line2: "", font: "serif", tsize: 0.3 }, readPrefs());
+let fonts = []; // lettering choices this computer has
 let items = [], cur = null, photo = null, outlinePath = null;
 let view = { s: 1, x: 0, y: 0 }, tool = "add", mode = "overlay";
 let drag = null, space = false, pointer = null, raf = 0, loadToken = 0;
@@ -73,7 +74,7 @@ function renderGallery() {
   const list = shown(), n = picked.size, photos = prefs.gView === "photo";
   $("grid").innerHTML = list.map((it) =>
     `<div class="card${picked.has(it.id) ? " picked" : ""}" data-id="${it.id}" title="Open ${esc(it.name)}">` +
-    `<div class="art">${photos ? `<img loading="lazy" alt="" src="/api/items/${it.id}/thumb?v=${it.rev}">` : thumb(it)}</div>` +
+    `<div class="art">${photos && it.photo ? `<img loading="lazy" alt="" src="/api/items/${it.id}/thumb?v=${it.rev}">` : thumb(it)}</div>` +
     `<input type="checkbox" class="pick" title="Select"${picked.has(it.id) ? " checked" : ""}>` +
     `<div class="cap"><b>${esc(it.name)}</b><small>${it.outline.bbox ? `${it.outline.height_in.toFixed(2)} in tall` : "nothing to cut yet"}` +
     `${it.done ? ' · <span class="ok">Finished ✓</span>' : ""}</small></div></div>`).join("") ||
@@ -85,6 +86,10 @@ function renderGallery() {
   $("gSheet").textContent = n ? `Sheet of ${n}` : "Sheet of all";
   $("gDel").textContent = n ? `Delete ${n}` : "Delete";
   $("gDel").disabled = $("gDone").disabled = !n;
+  const withPhoto = n ? targets().filter((it) => it.photo).length : 0;
+  $("gForget").textContent = withPhoto ? `Delete ${withPhoto} photo${withPhoto > 1 ? "s" : ""} only` : "Delete photos only";
+  $("gForget").disabled = !withPhoto;
+  $("gProof").disabled = !targets().some((it) => it.outline.bbox);
   $("gDone").textContent = n && targets().every((it) => it.done) ? "Mark not finished" : "Mark finished";
   $("gZip").disabled = $("gSheet").disabled = !targets().some((it) => it.outline.bbox);
 }
@@ -127,6 +132,37 @@ $("gDel").onclick = () => {
     renderList();
   });
 };
+$("gProof").onclick = async () => {
+  flushSettings();
+  await queue;
+  window.open(`/proof${idsQuery()}&${exportQuery()}`, "_blank");
+};
+$("gForget").onclick = () => {
+  const list = targets().filter((it) => it.photo);
+  if (!confirm(`Delete the original photo${list.length > 1 ? "s" : ""} of ${list.length} ${list.length > 1 ? "children" : "child"} and keep the silhouette${list.length > 1 ? "s" : ""}? They cannot be cut out again afterwards.`)) return;
+  enqueue(async () => {
+    for (const it of list) Object.assign(it, await api("POST", `/api/items/${it.id}/forget`), { name: it.name });
+    renderList();
+    busy(`${list.length} photo${list.length > 1 ? "s" : ""} deleted. The silhouettes are kept.`, 5000);
+  });
+};
+$("backupBtn").onclick = () => download("/api/backup");
+$("restoreBtn").onclick = () => $("restoreFile").click();
+$("restoreFile").onchange = (e) => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  busy("Restoring…");
+  enqueue(async () => {
+    const fd = new FormData();
+    fd.append("backup", f);
+    const r = await api("POST", "/api/restore", fd);
+    items = await api("GET", "/api/items");
+    if (cur) cur = items.find((it) => it.id === cur.id) || null;
+    renderList();
+    busy(`${r.added} photo${r.added === 1 ? "" : "s"} restored` + (r.skipped ? `, ${r.skipped} already here` : "") + ".", 6000);
+  });
+};
 $("list").addEventListener("click", (e) => {
   const el = e.target.closest(".kid");
   if (el) select(items.find((it) => it.id === el.dataset.id));
@@ -155,10 +191,10 @@ async function select(it) {
   }
   flushSettings();
   await queue;
-  await open(it, token);
+  await openItem(it, token);
 }
-async function open(it, token) {
-  const im = await loadImage(`/api/items/${it.id}/photo?v=${it.rev}`);
+async function openItem(it, token) {
+  const im = it.photo ? await loadImage(`/api/items/${it.id}/photo?v=${it.rev}`) : null;
   if (token !== loadToken) return;
   cur = it; photo = im;
   if (location.hash !== "#" + it.id) history.pushState(null, "", "#" + it.id); // Back closes; a reload reopens
@@ -177,6 +213,10 @@ function fillPanel() {
   $("smooth").value = s.smooth; $("detail").value = s.detail_mm; $("tilt").value = s.tilt_deg || 0;
   $("quality").value = prefs.quality;
   $("border").value = prefs.border; $("space").value = prefs.space; $("space").disabled = prefs.border === "circle";
+  $("text").value = prefs.text; $("line2").value = prefs.line2; $("font").value = prefs.font; $("tsize").value = prefs.tsize;
+  $("line2").disabled = prefs.text !== "both"; $("textMore").hidden = prefs.text === "none";
+  $("redo").disabled = $("quality").disabled = !cur.photo;
+  $("forget").hidden = !cur.photo;
   labels();
 }
 function labels() {
@@ -190,8 +230,17 @@ function showOutline() {
   const D = +prefs.ornD || 3, pad = 0.15;
   let shape = "";
   if (o.bbox) {
-    const b = o.bbox, k = cur.settings.height_in / (b[3] - b[1]);
-    shape = `<path fill-rule="evenodd" transform="scale(${cur.settings.flip ? -k : k} ${k}) translate(${-(b[0] + b[2]) / 2} ${-(b[1] + b[3]) / 2})" d="${o.d}"/>`;
+    // same layout as the files: shape, a small gap, then the lines of text, all centred on the ornament
+    const b = o.bbox, k = cur.settings.height_in / (b[3] - b[1]), lines = textLines(cur);
+    const block = lines.length ? 0.12 + lines.reduce((a, l) => a + 1.2 * l.size, 0) : 0;
+    let y = o.height_in / 2 - block / 2 + 0.12;
+    const css = (fonts.find((f) => f.key === prefs.font) || {}).css || "";
+    const text = lines.map((l) => {
+      const t = `<text x="0" y="${y + 0.78 * l.size}" font-size="${l.size}" text-anchor="middle" fill="#3a3a3a" style="${css}">${esc(l.text)}</text>`;
+      y += 1.2 * l.size;
+      return t;
+    }).join("");
+    shape = `<path fill-rule="evenodd" transform="translate(0 ${-block / 2}) scale(${cur.settings.flip ? -k : k} ${k}) translate(${-(b[0] + b[2]) / 2} ${-(b[1] + b[3]) / 2})" d="${o.d}"/>` + text;
   }
   $("orn").setAttribute("viewBox", `${-D / 2 - pad} ${-D / 2 - pad} ${D + 2 * pad} ${D + 2 * pad}`);
   $("orn").innerHTML = `<circle r="${D / 2}" fill="#d9b27c" stroke="#b08850" stroke-width="${D * 0.008}"/>` +
@@ -227,7 +276,7 @@ addEventListener("pagehide", () => { // closing the tab mid-typing: still save i
     body: JSON.stringify({ name: it.name, done: it.done, settings: it.settings }) });
 });
 function bind(id, ev, fn) { $(id).addEventListener(ev, (e) => { if (cur) fn(e.target); }); }
-bind("name", "input", (t) => { cur.name = t.value; pushSettings(400); });
+bind("name", "input", (t) => { cur.name = t.value; pushSettings(400); if (prefs.text !== "none") showOutline(); });
 bind("height", "change", (t) => {
   const v = Math.min(24, Math.max(0.25, +t.value || 2.25));
   t.value = v; cur.settings.height_in = prefs.height = v; savePrefs(); pushSettings(0); record("Size");
@@ -262,7 +311,22 @@ bind("smooth", "input", (t) => { cur.settings.smooth = +t.value; labels(); pushS
 bind("detail", "input", (t) => { cur.settings.detail_mm = +t.value; labels(); pushSettings(); });
 $("border").addEventListener("change", (e) => { prefs.border = e.target.value; $("space").disabled = prefs.border === "circle"; savePrefs(); });
 $("space").addEventListener("change", (e) => { prefs.space = Math.min(6, Math.max(0, +e.target.value || 0)); e.target.value = prefs.space; savePrefs(); });
-function exportQuery() { return `border=${prefs.border}&space=${prefs.space}&orn=${prefs.ornD}`; }
+function exportQuery() {
+  return `border=${prefs.border}&space=${prefs.space}&orn=${prefs.ornD}` +
+    (fonts.length && prefs.text !== "none" ? `&text=${prefs.text}&line2=${encodeURIComponent(prefs.line2)}&font=${prefs.font}&tsize=${prefs.tsize}` : "");
+}
+function textLines(it) { // [{text, size in inches}] under the shape, as the files will have
+  if (!fonts.length || prefs.text === "none") return [];
+  const out = [], size = +prefs.tsize || 0.3;
+  if (it.name.trim()) out.push({ text: it.name.trim(), size });
+  if (prefs.text === "both" && prefs.line2.trim()) out.push({ text: prefs.line2.trim(), size: size * 0.8 });
+  return out;
+}
+function textChanged() { savePrefs(); if (cur) { fillPanel(); showOutline(); } }
+$("text").addEventListener("change", (e) => { prefs.text = e.target.value; textChanged(); });
+$("font").addEventListener("change", (e) => { prefs.font = e.target.value; textChanged(); });
+$("line2").addEventListener("input", (e) => { prefs.line2 = e.target.value; savePrefs(); if (cur) showOutline(); });
+$("tsize").addEventListener("change", (e) => { prefs.tsize = Math.min(2, Math.max(0.1, +e.target.value || 0.3)); textChanged(); });
 $("quality").addEventListener("change", (e) => { prefs.quality = e.target.value; savePrefs(); });
 
 async function download(url) {
@@ -282,6 +346,16 @@ $("redo").onclick = () => {
     it.outline = await api("POST", `/api/items/${it.id}/redo`, { quality: prefs.quality });
     if (it === cur) { await loadMask(it); showOutline(); pushHist("New cut-out", await maskBlob(), JSON.stringify(it.settings)); }
     busy(it.outline.note || "", 8000);
+  });
+};
+$("forget").onclick = () => {
+  if (!confirm(`Delete the original photo of "${cur.name}" and keep the silhouette? It cannot be cut out again afterwards.`)) return;
+  const it = cur;
+  enqueue(async () => {
+    Object.assign(it, await api("POST", `/api/items/${it.id}/forget`), { name: it.name });
+    if (it === cur) { photo = null; fillPanel(); draw(); }
+    renderList();
+    busy("Photo deleted. The silhouette is kept.", 5000);
   });
 };
 $("del").onclick = () => {
@@ -350,14 +424,15 @@ function render() {
   const dpr = devicePixelRatio || 1;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, cv.width, cv.height);
-  if (!cur || !photo) return;
+  if (!cur) return;
   ctx.setTransform(dpr * view.s, 0, 0, dpr * view.s, dpr * view.x, dpr * view.y);
   const px = 1 / view.s; // one screen pixel, in photo pixels
   // the photo and painted shape are shown straightened; the cut line and neckline already are
   ctx.save();
   ctx.translate(cur.w / 2, cur.h / 2); ctx.rotate(tiltRad()); ctx.translate(-cur.w / 2, -cur.h / 2);
   if (mode === "shape") { ctx.fillStyle = "#f4efe6"; ctx.fillRect(0, 0, cur.w, cur.h); }
-  else ctx.drawImage(photo, 0, 0);
+  else if (photo) ctx.drawImage(photo, 0, 0);
+  else { ctx.fillStyle = "#e9e4da"; ctx.fillRect(0, 0, cur.w, cur.h); } // the photo was deleted
   if (mode !== "photo") {
     if (tintStale || tintMode !== mode) {
       tctx.globalCompositeOperation = "copy"; tctx.drawImage(mask, 0, 0);
@@ -568,7 +643,7 @@ function rotate(turns) {
   enqueue(async () => {
     const r = await api("POST", `/api/items/${it.id}/rotate`, { turns });
     Object.assign(it, r, { name: it.name, done: it.done }); // keep a rename that is still on its way
-    if (it === cur) await open(it, ++loadToken); else renderList();
+    if (it === cur) await openItem(it, ++loadToken); else renderList();
   });
 }
 $("rotL").onclick = () => rotate(-1);
@@ -616,7 +691,13 @@ addEventListener("keyup", (e) => { if (e.code === "Space") { space = false; draw
 /* ---------- start ---------- */
 setTool("add"); setMode("overlay");
 (async () => {
-  try { items = await api("GET", "/api/items"); } catch (e) { busy(e.message); }
+  try {
+    items = await api("GET", "/api/items");
+    fonts = await api("GET", "/api/fonts");
+  } catch (e) { busy(e.message); }
+  $("textRows").hidden = !fonts.length; // no usable font on this computer: no lettering
+  $("font").innerHTML = fonts.map((f) => `<option value="${f.key}">${esc(f.label)}</option>`).join("");
+  if (fonts.length && !fonts.some((f) => f.key === prefs.font)) prefs.font = fonts[0].key;
   renderList();
   fromHash();
 })();

@@ -2,9 +2,10 @@
 # On Windows, setup.bat then swaps onnxruntime for onnxruntime-directml so the
 # best cut-out model can use the graphics card.
 rembg[cpu]>=2.0.60
-flask>=3.0
+flask>=3.1
 opencv-python-headless>=4.8
 pillow>=10.0
 pillow-heif>=0.16  # iPhone photos (HEIC)
 numpy>=1.26
 scikit-image>=0.22
+fonttools>=4.40  # turns names into outlines for the cut files

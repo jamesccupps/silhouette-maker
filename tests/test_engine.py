@@ -160,3 +160,37 @@ def test_iphone_heic_photo_opens(tmp_path):
     Image.new("RGB", (640, 480), (180, 170, 160)).save(f, format="HEIF")
     img = engine.load_photo(f)
     assert img.mode == "RGB" and img.size == (640, 480)
+
+
+needs_font = pytest.mark.skipif(not engine.fonts(), reason="no usable font on this computer")
+
+
+@needs_font
+def test_a_name_becomes_outlines_not_text():
+    key = engine.fonts()[0]["key"]
+    m = bust()
+    s = settings(m)
+    r = engine.outline(m, s)
+    plain = engine.svg_single(r, s, "Ava")
+    named = engine.svg_single(r, s, "Ava", {"text": "name", "font": key, "tsize": 0.3})
+    both = engine.svg_single(r, s, "Ava", {"text": "both", "line2": "2026", "font": key, "tsize": 0.3})
+    assert "<text" not in named  # Design Space ignores <text>; it must be a path
+    assert named.count("<path") == plain.count("<path") + 1 and "Ava lettering" in named
+    h = lambda svg: float(re.search(r'height="([\d.]+)in"', svg).group(1))
+    assert h(plain) == 2.25 and h(named) == pytest.approx(2.25 + 0.12 + 0.36) and h(both) > h(named)
+    # no name and no second line: nothing is added
+    assert engine.svg_single(r, s, "  ", {"text": "name", "font": key}) == engine.svg_single(r, s, "  ")
+
+
+@needs_font
+def test_lettering_is_centred_under_the_shape_and_can_widen_the_piece():
+    key = engine.fonts()[0]["key"]
+    m = bust()
+    s = settings(m)
+    r = engine.outline(m, s)
+    sw, sh = engine.size_in(r, s)
+    w, h, ox, oy = engine.layout(r, s, {"text": "name", "font": key, "tsize": 0.5}, "A very long name indeed")
+    assert w > sw and ox == pytest.approx((w - sw) / 2) and oy == 0
+    d = engine.text_d("Ava", key, 21.6, 100.0, 50.0)
+    xs = [float(v) for v in re.findall(r"(-?[\d.]+) -?[\d.]+", d)]
+    assert min(xs) < 100 < max(xs) and (min(xs) + max(xs)) / 2 == pytest.approx(100, abs=3)
