@@ -368,6 +368,21 @@ def patch_item(item_id):
     return jsonify(_public(d, meta))
 
 
+@app.post("/api/height")
+def height_for_all():
+    """Give every photo the same shape height, so the ornaments match."""
+    h = _num((request.get_json(silent=True) or {}).get("height_in"), 0.25, 24.0, -1.0)
+    if h < 0:
+        abort(400)
+    out = []
+    for d, meta in _items():
+        if meta["settings"].get("height_in") != h:
+            meta["settings"]["height_in"] = h
+            _save_meta(d, meta)
+        out.append(_public(d, meta))
+    return jsonify(out)
+
+
 @app.delete("/api/items/<item_id>")
 def delete_item(item_id):
     d = _dir(item_id)

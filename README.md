@@ -92,9 +92,14 @@ otherwise the app falls back to *Fast*.
    - **Smoothing** rounds the outline; **Thinnest detail kept** drops what is
      too thin to cut.
    - The orange line is exactly what will be cut.
-4. Set **Shape height** and the ornament size, tick **Finished**.
+4. Set **Shape height** and the ornament size, tick **Finished**. **Use this
+   height for everyone** gives every photo the same height, so the ornaments
+   match; photos added later get it too.
 5. **Download SVG for Cricut**. From the gallery, **Download all SVGs** gives a
-   zip and **Sheet of all** packs the children onto 11.5 in sheets.
+   zip and **Sheet of all** packs the children onto sheets for the mat chosen
+   beside it: 12 × 12, 12 × 24, Joy 4.5 × 12, or a letter page. Design Space
+   may shrink a file taller than 11.5 in, so check the size after uploading a
+   12 × 24 sheet.
 
 **Around the shape** adds a box or the ornament circle to the files, with
 **Space** for a margin. They arrive in Design Space as their own layer: cut

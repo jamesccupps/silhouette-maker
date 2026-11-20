@@ -148,7 +148,13 @@ body.home #right{display:none}
         <span class="grow"></span>
         <button id="gAll"></button>
         <button id="gZip" title="One SVG per child, in a zip"></button>
-        <button id="gSheet" title="Children together on one mat-sized SVG, to save material"></button>
+        <select id="mat" title="The cutting area the sheet is laid out for. Design Space may shrink a file taller than 11.5 in, so check its size after uploading a 12 × 24 sheet.">
+          <option value="11.5x11.5">12 × 12 mat</option>
+          <option value="11.5x23.5">12 × 24 mat</option>
+          <option value="4.25x11.75">Joy 4.5 × 12 mat</option>
+          <option value="8x10.5">Letter page</option>
+        </select>
+        <button id="gSheet" title="Children together on sheets the size chosen on the left, to save material"></button>
         <button id="gDone" title="Mark the selected ones finished, or not finished"></button>
         <button id="gDel" class="danger"></button>
       </div>
@@ -167,6 +173,7 @@ body.home #right{display:none}
       <label class="field" style="flex:1"><span>Shape height (in)</span><input type="number" id="height" min="0.25" max="24" step="0.05"></label>
       <label class="field" style="flex:1"><span>Ornament (in)</span><input type="number" id="ornD" min="0.5" max="24" step="0.25"></label>
     </div>
+    <button id="sizeAll" title="Give every photo this shape height, so all the ornaments match">Use this height for everyone</button>
     <label class="check"><input type="checkbox" id="done"> Finished</label>
     <label class="check"><input type="checkbox" id="flip"> Face the other way</label>
     <label class="check"><input type="checkbox" id="cutOn"> Cut off at the neckline</label>

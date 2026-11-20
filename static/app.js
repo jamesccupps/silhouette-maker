@@ -4,7 +4,7 @@ const cv = $("cv"), ctx = cv.getContext("2d");
 const mask = document.createElement("canvas"), mctx = mask.getContext("2d", { willReadFrequently: true });
 const tint = document.createElement("canvas"), tctx = tint.getContext("2d");
 
-const prefs = Object.assign({ ornD: 3, height: 2.25, quality: "best", border: "none", space: 0, grid: false }, readPrefs());
+const prefs = Object.assign({ ornD: 3, height: 2.25, quality: "best", border: "none", space: 0, grid: false, mat: "11.5x11.5" }, readPrefs());
 let items = [], cur = null, photo = null, outlinePath = null;
 let view = { s: 1, x: 0, y: 0 }, tool = "add", mode = "overlay";
 let drag = null, space = false, pointer = null, raf = 0, loadToken = 0;
@@ -105,7 +105,13 @@ $("gAll").onclick = () => {
 };
 function idsQuery() { return "?ids=" + targets().filter((it) => it.outline.bbox).map((it) => it.id).join(","); }
 $("gZip").onclick = () => download("/api/svgs.zip" + idsQuery() + "&" + exportQuery());
-$("gSheet").onclick = () => download("/api/sheet" + idsQuery() + "&" + exportQuery());
+$("mat").value = prefs.mat;
+if (!$("mat").value) $("mat").value = prefs.mat = "11.5x11.5"; // a saved size this version no longer offers
+$("mat").onchange = (e) => { prefs.mat = e.target.value; savePrefs(); };
+$("gSheet").onclick = () => {
+  const [w, h] = prefs.mat.split("x");
+  download(`/api/sheet${idsQuery()}&w=${w}&h=${h}&${exportQuery()}`);
+};
 $("gDone").onclick = () => {
   const list = targets(), done = !list.every((it) => it.done);
   enqueue(async () => {
@@ -226,6 +232,23 @@ bind("height", "change", (t) => {
   const v = Math.min(24, Math.max(0.25, +t.value || 2.25));
   t.value = v; cur.settings.height_in = prefs.height = v; savePrefs(); pushSettings(0); record("Size");
 });
+$("sizeAll").onclick = () => {
+  const h = cur.settings.height_in;
+  if (items.length < 2) return busy("This is the only photo so far.", 3000);
+  if (!confirm(`Make all ${items.length} photos ${h} in tall?`)) return;
+  flushSettings();
+  busy("Resizing everyone…");
+  enqueue(async () => {
+    for (const r of await api("POST", "/api/height", { height_in: h })) {
+      const it = items.find((i) => i.id === r.id);
+      if (it) { it.settings.height_in = r.settings.height_in; it.outline = r.outline; }
+    }
+    prefs.height = h; savePrefs(); // new photos get it too
+    renderList();
+    if (cur) { fillPanel(); showOutline(); }
+    busy(`All ${items.length} photos are now ${h} in tall.`, 4000);
+  });
+};
 bind("ornD", "change", (t) => { prefs.ornD = Math.min(24, Math.max(0.5, +t.value || 3)); t.value = prefs.ornD; savePrefs(); showOutline(); });
 bind("done", "change", (t) => { cur.done = t.checked; pushSettings(0); });
 bind("flip", "change", (t) => { cur.settings.flip = t.checked; pushSettings(0); record("Face the other way"); });

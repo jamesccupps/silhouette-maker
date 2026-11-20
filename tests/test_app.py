@@ -199,3 +199,34 @@ def test_photos_keep_the_order_they_were_added(client):
     names = [add(client, name=f"{n}.jpg")["name"] for n in ("c", "a", "b")]
     got = client.get("/api/items", base_url=BASE).get_json()
     assert [g["name"] for g in got] == names and got[0]["added"] <= got[1]["added"] <= got[2]["added"]
+
+
+def test_one_height_for_everyone(client):
+    a, b = add(client), add(client, name="Ben.jpg")
+    client.patch(f"/api/items/{a['id']}", base_url=BASE, json={"settings": {"height_in": 1.5, "flip": True}})
+    got = client.post("/api/height", base_url=BASE, json={"height_in": 3.25}).get_json()
+    assert [g["settings"]["height_in"] for g in got] == [3.25, 3.25]
+    assert [g["outline"]["height_in"] for g in got] == [3.25, 3.25]
+    assert got[0]["settings"]["flip"] is True  # nothing else is touched
+    saved = client.get("/api/items", base_url=BASE).get_json()
+    assert all(s["settings"]["height_in"] == 3.25 for s in saved)
+    for bad in ({"height_in": "big"}, {}, None):
+        assert client.post("/api/height", base_url=BASE, json=bad).status_code == 400
+
+
+def test_sheet_is_laid_out_for_the_chosen_mat(client):
+    for i in range(12):
+        add(client, name=f"kid{i}.jpg")
+
+    def sheet(query):
+        r = client.get("/api/sheet" + query, base_url=BASE)
+        if r.mimetype == "application/zip":
+            names = zipfile.ZipFile(io.BytesIO(r.data)).namelist()
+            return len(names), zipfile.ZipFile(io.BytesIO(r.data)).read(names[0]).decode()
+        return 1, r.data.decode()
+
+    n_joy, joy = sheet("?w=4.25&h=11.75")
+    n_long, long_mat = sheet("?w=11.5&h=23.5")
+    assert 'width="4.2500in" height="11.7500in"' in joy and n_joy > 1
+    assert 'width="11.5000in" height="23.5000in"' in long_mat and n_long == 1
+    assert long_mat.count("<path") == 12
