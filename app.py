@@ -24,7 +24,7 @@ from PIL import Image
 import engine
 import model3d
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 ROOT = Path(__file__).resolve().parent
 
 
@@ -719,8 +719,13 @@ def restore():
     f = request.files.get("backup")
     if not f:
         abort(400)
+    # Into a real temporary file first: the upload's own stream cannot be read
+    # by zipfile on Python 3.10 (its SpooledTemporaryFile has no seekable()).
+    src = tempfile.TemporaryFile()
+    shutil.copyfileobj(f.stream, src)
+    src.seek(0)
     try:
-        z = zipfile.ZipFile(f.stream)
+        z = zipfile.ZipFile(src)
     except zipfile.BadZipFile:
         return jsonify({"error": "That file is not a Silhouette Maker backup."}), 400
     groups: dict[str, dict] = {}

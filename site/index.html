@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Silhouette Maker: photo to Cricut silhouette, on your PC</title>
+<meta name="description" content="Free, open source app that turns side-on photos into silhouette cut files for a Cricut, for printing and for 3D printing. Runs on your PC: no photo is uploaded.">
+<meta name="theme-color" content="#f7f5f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#14161a" media="(prefers-color-scheme: dark)">
+<link rel="canonical" href="https://jamesccupps.github.io/silhouette-maker/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="James Cupps">
+<meta property="og:title" content="Silhouette Maker: photo to Cricut silhouette, on your PC">
+<meta property="og:description" content="Free and open source. Side-on photos in, silhouette cut files out: SVG for a Cricut, pages that print at real size, STL files for a 3D printer. No photo leaves the computer.">
+<meta property="og:url" content="https://jamesccupps.github.io/silhouette-maker/">
+<meta property="og:image" content="https://jamesccupps.github.io/silhouette-maker/images/social-preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta property="og:image:alt" content="Silhouette Maker: side-on photos into silhouette cut files, on your own computer. Beside a silhouette on a round ornament">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23d9b27c'/%3E%3Cpath d='M9 15c0-5 3.5-8 8-8s7.500 3.500 7.500 8c0 2.500-1.200 4.500-3 5.800V23c2 .5 3.500 1.300 4.500 2.500H7.500C8.500 24.300 10.500 23.500 13 23v-2l-2.500-.6-.3-1.600-1-.5.6-1.200z' fill='%23111'/%3E%3C/svg%3E">
+<meta name="color-scheme" content="light dark">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Silhouette Maker",
+  "description": "Turns side-on photos into silhouette cut files for a Cricut, on your own PC: automatic cut-out by a local model, touch-up, lettering, ornament shapes, SVG and PNG, printing at real size and STL files for 3D printing. No photo is uploaded.",
+  "url": "https://jamesccupps.github.io/silhouette-maker/",
+  "codeRepository": "https://github.com/jamesccupps/silhouette-maker",
+  "downloadUrl": "https://github.com/jamesccupps/silhouette-maker/releases/latest",
+  "applicationCategory": "DesignApplication",
+  "operatingSystem": "Windows 10, Windows 11",
+  "license": "https://opensource.org/licenses/MIT",
+  "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
+  "author": {"@type": "Person", "name": "James Cupps", "url": "https://jamesccupps.github.io/"}
+}
+</script>
+<style>
+:root { --bg: #f7f5f1; --card: #ffffff; --text: #1f1d1a; --dim: #625c53; --line: #e2ddd4; --accent: #a8540a;
+        --accent-text: #ffffff; --shadow: 0 1px 2px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.06); }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #14161a; --card: #1c1f25; --text: #e9e6e0; --dim: #a39d92; --line: #2b2f37; --accent: #f0a53c;
+          --accent-text: #14161a; --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35); }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 "Segoe UI", system-ui, -apple-system, sans-serif; }
+a { color: var(--accent); }
+.wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+header.hero { padding: 64px 0 28px; text-align: center; }
+.logo { width: 56px; height: 56px; }
+h1 { font-size: 44px; line-height: 1.15; margin: 14px 0 10px; letter-spacing: -.5px; }
+.tagline { font-size: 20px; color: var(--dim); max-width: 760px; margin: 0 auto 26px; }
+.btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.btn { display: inline-block; padding: 12px 22px; border-radius: 10px; background: var(--accent); color: var(--accent-text);
+       text-decoration: none; font-weight: 600; }
+.btn small { font-weight: 400; opacity: .8; margin-left: 6px; }
+.btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+.meta { color: var(--dim); font-size: 14px; margin-top: 12px; }
+.shot { display: block; width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--line); box-shadow: var(--shadow); }
+.caption { color: var(--dim); font-size: 14px; text-align: center; margin: 8px 0 0; }
+section { padding: 44px 0 8px; }
+h2 { font-size: 28px; margin: 0 0 18px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+.card h3 { margin: 0 0 6px; font-size: 17px; }
+.card p { margin: 0; color: var(--dim); font-size: 15px; }
+.gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 22px; }
+.gallery figure { margin: 0; }
+.gallery figcaption { color: var(--dim); font-size: 14px; margin-top: 8px; }
+ol li, ul li { margin: 6px 0; }
+code { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; font-size: 14px; }
+footer { color: var(--dim); font-size: 14px; padding: 48px 0 40px; text-align: center; }
+@media (max-width: 520px) { h1 { font-size: 34px; } .gallery { grid-template-columns: 1fr; } }
+
+  /* More tools from James Cupps */
+  .jc-more-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .jc-more-grid a { display: block; text-decoration: none; background: var(--panel, var(--card, transparent)); border: 1px solid var(--line, rgba(127,127,127,.3));
+                    border-radius: 10px; padding: 14px 16px; color: var(--text, inherit); }
+  .jc-more-grid a:hover { border-color: var(--accent, currentColor); }
+  .jc-more-grid b { display: block; color: var(--accent, inherit); }
+  .jc-more-grid span { color: var(--muted, inherit); font-size: 14px; }
+</style>
+</head>
+<body>
+<header class="hero wrap">
+  <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15" fill="#d9b27c"/><path d="M9 15c0-5 3.500-8 8-8s7.500 3.500 7.500 8c0 2.500-1.200 4.500-3 5.800V23c2 .5 3.500 1.300 4.500 2.500H7.500C8.500 24.300 10.500 23.500 13 23v-2l-2.500-.6-.3-1.600-1-.5.6-1.200z" fill="#111"/></svg>
+  <h1>Silhouette Maker</h1>
+  <p class="tagline">Turn side-on photos into silhouette cut files for a Cricut, on your own computer. <em>No photo is uploaded anywhere.</em></p>
+  <div class="btns">
+    <a class="btn" id="primary" href="https://github.com/jamesccupps/silhouette-maker/releases/latest/download/Silhouette-Maker.zip">Download for Windows <small id="ver"></small></a>
+    <a class="btn ghost" href="https://github.com/jamesccupps/silhouette-maker">Source on GitHub</a>
+  </div>
+  <p class="meta">Free and open source (MIT) · Windows 10 or 11 with Python 3.10 to 3.13 · runs locally, photos never leave your PC</p>
+</header>
+
+<main class="wrap">
+  <img class="shot" src="images/editor.png" alt="The editor: a profile photo with its cut line and neckline, and the silhouette on a round ornament with a curved name" width="1500" height="900">
+  <p class="caption">The editor. The pictures on this page use drawn sample profiles, not real children.</p>
+
+  <section>
+    <h2>Made for a daycare ornament project</h2>
+    <p>Photograph each child in profile, cut the silhouette from black vinyl or paper, and put it on a wooden ornament. Photos of children should not go to an online service for that, so the cut-out is done by a model that runs on your own PC.</p>
+    <div class="grid">
+      <div class="card"><h3>Automatic cut-out</h3><p>Each photo is cut out by itself and stood upright if it was taken sideways or upside down. JPEG, PNG, WebP and iPhone HEIC photos all work.</p></div>
+      <div class="card"><h3>Touch-up when it needs it</h3><p>Add and Erase brushes with undo and a history, turn and straighten, a grid, and a neckline you shape with three dots.</p></div>
+      <div class="card"><h3>The ornament, as it will look</h3><p>Circle, oval, heart, star and more, in your wood and vinyl colours, with the silhouette at its real size and a warning when it does not fit.</p></div>
+      <div class="card"><h3>Lettering that cuts</h3><p>The name and a second line, straight or curved along the edge, in any font on your PC. Letters go into the file as outlines, so Design Space cuts them.</p></div>
+      <div class="card"><h3>A whole class at once</h3><p>A gallery with one card per child, one height for everyone, sheets laid out for your mat, and every file in one download.</p></div>
+      <div class="card"><h3>Yours to keep or delete</h3><p>Delete the photos and keep only the silhouettes when you are done, or back everything up as one file.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Three ways out</h2>
+    <div class="gallery">
+      <figure><img width="1500" height="900" class="shot" src="images/gallery.png" alt="The gallery: one card per child with the silhouette and its height" loading="lazy"><figcaption><b>Cricut:</b> SVG files at true size for Design Space, one child or the whole class, and PNG.</figcaption></figure>
+      <figure><img width="1500" height="900" class="shot" src="images/print.png" alt="The print preview: silhouettes on dashed ornament outlines, with a 2 inch bar to check the scale" loading="lazy"><figcaption><b>Paper:</b> a print preview of pages that come out at real size, with a 2 inch bar on every page to check. Print, or save as PDF.</figcaption></figure>
+      <figure><img width="1500" height="900" class="shot" src="images/3d-printing.png" alt="The 3D printing section: a picture of the ornament model, its thickness, the hanging hole and the STL downloads" loading="lazy"><figcaption><b>3D printing:</b> the whole ornament with the silhouette and lettering raised, as one STL or as colour parts, or the silhouette alone.</figcaption></figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>Photos never leave the computer</h2>
+    <ul>
+      <li>The cut-out is done by a model running on your PC. Nothing is uploaded.</li>
+      <li>The app is a page served from <code>127.0.0.1</code>, and it refuses requests from any other computer or web site.</li>
+      <li>The only download is the cut-out model itself, fetched once on first use. After that it works offline.</li>
+      <li>Working copies of the photos are ordinary files in the app's <code>data</code> folder. <b>Delete</b> in the app removes them.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Install</h2>
+    <ol>
+      <li>Install <a href="https://www.python.org/downloads/">Python</a> 3.10 to 3.13 if the PC doesn't have it.</li>
+      <li><a href="https://github.com/jamesccupps/silhouette-maker/releases/latest/download/Silhouette-Maker.zip">Download Silhouette-Maker.zip</a> and unzip it.</li>
+      <li>Double-click <b>Start Silhouette Maker.bat</b>. The first run sets itself up, then a page opens in your browser.</li>
+    </ol>
+    <p>The <b>Best</b> cut-out uses the graphics card: about 1 second a photo on an NVIDIA RTX 3060 with NVIDIA's own runtime (a one-time download of about 2.2 GB), about 11 seconds on any other DirectX 12 card. <b>Fast</b> runs on any PC in about a second and is rougher around hair. The app looks at your PC and says which suits it.</p>
+  </section>
+
+  <section aria-labelledby="jc-more">
+    <h2 id="jc-more">More tools from James Cupps</h2>
+    <div class="jc-more-grid">
+      <a href="https://jamesccupps.github.io/Slate/"><b>Slate</b><span>A text editor for files of any size</span></a>
+      <a href="https://jamesccupps.github.io/HW-Blackbox/"><b>HW Blackbox</b><span>A hardware monitor and black box for Windows</span></a>
+      <a href="https://jamesccupps.github.io/PingerPlot/"><b>PingerPlot</b><span>Continuous traceroute: where on the path it goes wrong</span></a>
+      <a href="https://jamesccupps.github.io/NoteForge/"><b>NoteForge</b><span>Encrypted, offline notes for Windows</span></a>
+      <a href="https://jamesccupps.github.io/"><b>Everything else</b><span>Every project, on one page</span></a>
+    </div>
+  </section>
+</main>
+
+<footer class="wrap">
+  Silhouette Maker is MIT licensed, made by <a href="https://jamesccupps.github.io/">James Cupps</a> · <a href="https://github.com/jamesccupps/silhouette-maker">GitHub</a> ·
+  <a href="https://github.com/jamesccupps/silhouette-maker/releases">Releases</a> ·
+  <a href="https://github.com/jamesccupps/silhouette-maker/issues">Report a problem</a>
+</footer>
+
+<script>
+fetch("https://api.github.com/repos/jamesccupps/silhouette-maker/releases/latest")
+  .then(function (r) { return r.ok ? r.json() : null; })
+  .then(function (d) { if (d && d.tag_name) document.getElementById("ver").textContent = d.tag_name; })
+  .catch(function () {});
+</script>
+</body>
+</html>

@@ -537,6 +537,8 @@ def text_d(text: str, key: str, size: float, cx: float, baseline: float, pen=Non
     own = pen is None
     if own:
         pen = SVGPathPen(glyphs, ntos=lambda v: f"{v:.2f}")
+    if not own:
+        pen.glyphSet = glyphs  # letters built from other glyphs (accents) look their parts up here
     for g, x in run:
         glyphs[g].draw(TransformPen(pen, (k, 0, 0, -k, x0 + x * k, baseline)))
         if not own:
@@ -600,6 +602,8 @@ def arc_d(segments: list[tuple[str, str, float]], cx: float, cy: float, radius: 
         own = pen is None or isinstance(pen, SVGPathPen)
         if own:
             pen = SVGPathPen(glyphs, ntos=lambda v: f"{v:.2f}")
+        if not own:
+            pen.glyphSet = glyphs
         for g, x in run:
             adv = hmtx[g][0] * k
             th = (start + x * k + adv / 2 - total / 2) / radius  # angle of this letter's middle, 0 = bottom

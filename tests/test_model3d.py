@@ -115,6 +115,16 @@ def test_letters_keep_their_holes():
     assert len(polys) == 3 and sum(len(p.interiors) for p in polys) == 5  # B has two holes, O one
 
 
+@pytest.mark.parametrize("place", ["below", "arc"])
+def test_letters_built_from_parts_are_lettered_too(place):
+    # An accented letter is usually made of two other glyphs in the font; so is
+    # Georgia's middle dot. Those used to stop the 3D files (0.5.0).
+    for font in ("serif", "sans"):
+        sh = model3d.ornament_shapes("Zoé", shape(), S, {"orn": 3.0, "name_on": True, "line2": "2026",
+                                                        "place": place, "font": font})
+        assert sh["lettering"] is not None and sh["lettering"].area > 1
+
+
 def test_a_picture_of_the_model():
     png = model3d.ornament_picture("Ava", shape(), S, {"orn": 3.0, "name_on": True})
     assert png[:4] == b"\x89PNG" and len(png) > 2000

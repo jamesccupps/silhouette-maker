@@ -1,0 +1,6 @@
+# Blank issues stay allowed. Security problems go through private reporting, not an issue (see SECURITY.md).
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security problem privately
+    url: https://github.com/jamesccupps/silhouette-maker/security/advisories/new
+    about: Anything that could get a photo, a silhouette or a name off the computer. Only the maintainer sees it.

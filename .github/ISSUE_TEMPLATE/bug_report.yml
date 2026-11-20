@@ -1,0 +1,61 @@
+name: Bug report
+description: Something in Silhouette Maker doesn't work the way it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time! **Please don't attach photos of children.** A drawn or stock profile that shows the same problem is just as useful, and the drawn ones in `samples/` are there for that.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen, if you know
+      placeholder: |
+        1. Add a photo taken sideways
+        2. Open it and press Neckline
+        3. …
+  - type: input
+    id: version
+    attributes:
+      label: Silhouette Maker version
+      description: The release you downloaded, or `__version__` near the top of app.py
+      placeholder: "0.5.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: system
+    attributes:
+      label: System
+      options:
+        - Windows 11
+        - Windows 10
+        - Linux
+        - macOS
+    validations:
+      required: true
+  - type: dropdown
+    id: method
+    attributes:
+      label: Cut-out method
+      description: Shown under "Add photos…" on the left
+      options:
+        - Best
+        - Fast
+        - Not about the cut-out
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: >
+        The graphics card (the app names it under "Add photos…"), a screenshot, and any message in the black window
+        the app runs in. Names typed into the app can show in screenshots: blank them if they are real children's.

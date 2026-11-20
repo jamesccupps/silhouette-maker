@@ -1,0 +1,29 @@
+name: Idea or feature request
+description: Something Silhouette Maker could do, or do better
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Silhouette Maker does one job: side-on photos in, cut files out, with nothing leaving the computer. Ideas that make that job quicker or the result nicer are the most welcome. Anything that would send a photo somewhere is out.
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like it to do?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What would it help with?
+      description: What you are making, which cutter or printer, and what you do today instead.
+  - type: dropdown
+    id: output
+    attributes:
+      label: What you make with it
+      multiple: true
+      options:
+        - Vinyl or paper on a cutting machine
+        - Printing on paper
+        - 3D printing
+        - Something else

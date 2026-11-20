@@ -1,15 +1,27 @@
 # Silhouette Maker
 
+[![Tests](https://github.com/jamesccupps/silhouette-maker/actions/workflows/tests.yml/badge.svg)](https://github.com/jamesccupps/silhouette-maker/actions/workflows/tests.yml)
+[![Latest release](https://img.shields.io/github/v/release/jamesccupps/silhouette-maker?label=release)](https://github.com/jamesccupps/silhouette-maker/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 Turn side-on photos into silhouette cut files for a Cricut, entirely on your
 own computer. Made for a daycare ornament project: photograph each child in
 profile, cut the silhouette from black vinyl or paper, put it on a wooden
 ornament.
 
-![The gallery: one card per child](docs/gallery.png)
+**[⬇ Download for Windows](https://github.com/jamesccupps/silhouette-maker/releases/latest/download/Silhouette-Maker.zip)**
+(Windows 10 or 11 with Python 3.10 to 3.13) · [All releases](https://github.com/jamesccupps/silhouette-maker/releases) ·
+[Website](https://jamesccupps.github.io/silhouette-maker/)
 
 ![The editor: photo, cut line, neckline and ornament preview](docs/editor.png)
 
-*The pictures above use the drawn sample profiles in `samples/`, not real children.*
+![The gallery: one card per child](docs/gallery.png)
+
+| Print at real size | 3D printing |
+| --- | --- |
+| ![The print preview: each page as it will print, with a 2 inch bar to check the scale](docs/print.png) | ![The 3D printing section: a picture of the model, thickness, hanging hole and the STL downloads](docs/3d-printing.png) |
+
+*The pictures use the drawn sample profiles in `samples/`, not real children.*
 
 ## Photos never leave the computer
 
@@ -54,7 +66,8 @@ ornament.
 You need Windows 10 or 11 and [Python](https://www.python.org/downloads/) 3.10
 to 3.13.
 
-1. Download this repository (**Code → Download ZIP**) and unzip it, or clone it.
+1. [Download Silhouette-Maker.zip](https://github.com/jamesccupps/silhouette-maker/releases/latest/download/Silhouette-Maker.zip)
+   and unzip it, or clone this repository.
 2. Double-click **Start Silhouette Maker.bat**. The first run sets itself up
    (a few minutes), then a page opens in your browser.
 3. To stop the app, close the black window.
