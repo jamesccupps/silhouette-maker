@@ -173,6 +173,7 @@ def add_item():
     d.mkdir(parents=True)
     img.save(d / "photo.jpg", quality=92)
     Image.fromarray(mask).save(d / "mask.png")
+    Image.fromarray(mask).save(d / "start.png")  # what "reset" goes back to
     settings = dict(engine.DEFAULT_SETTINGS, cut=engine.default_cut(mask))
     for k in ("height_in",):
         if request.form.get(k):
@@ -227,7 +228,30 @@ def redo_cutout(item_id):
     except Exception as e:
         return jsonify({"error": f"The cut-out model could not run: {str(e)[:200]}"}), 500
     Image.fromarray(mask).save(d / "mask.png")
+    Image.fromarray(mask).save(d / "start.png")  # a new cut-out is the new starting point
     return jsonify(dict(_outline_json(d, meta), note=note))
+
+
+@app.post("/api/items/<item_id>/reset")
+def reset_item(item_id):
+    """Back to the automatic cut-out and the starting settings (the size is kept)."""
+    d = _dir(item_id)
+    meta = _meta(d)
+    note = ""
+    if (d / "start.png").exists():
+        mask = np.asarray(Image.open(d / "start.png").convert("L"))
+    else:  # added before the app kept a starting copy: make the cut-out again
+        quality = (request.get_json(silent=True) or {}).get("quality", "best")
+        try:
+            mask, note = _cut_out(Image.open(d / "photo.jpg").convert("RGB"), quality)
+        except Exception as e:
+            return jsonify({"error": f"The cut-out model could not run: {str(e)[:200]}"}), 500
+        Image.fromarray(mask).save(d / "start.png")
+    Image.fromarray(mask).save(d / "mask.png")
+    meta["settings"] = dict(engine.DEFAULT_SETTINGS, cut=engine.default_cut(mask),
+                            height_in=meta["settings"].get("height_in", engine.DEFAULT_SETTINGS["height_in"]))
+    _save_meta(d, meta)
+    return jsonify(dict(_public(d, meta), note=note))
 
 
 @app.post("/api/items/<item_id>/rotate")
@@ -239,6 +263,9 @@ def rotate_item(item_id):
     img, mask = engine.turn(Image.open(d / "photo.jpg").convert("RGB"), _mask(d), -turns)
     img.save(d / "photo.jpg", quality=95)
     Image.fromarray(mask).save(d / "mask.png")
+    if (d / "start.png").exists():  # the starting copy turns with the photo
+        start = np.rot90(np.asarray(Image.open(d / "start.png").convert("L")), -turns % 4)
+        Image.fromarray(np.ascontiguousarray(start)).save(d / "start.png")
     (d / "thumb.jpg").unlink(missing_ok=True)
     meta.update(w=img.width, h=img.height, rev=meta.get("rev", 0) + 1)
     meta["settings"]["cut"] = engine.default_cut(mask)

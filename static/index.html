@@ -73,6 +73,13 @@ body.home #right{display:none}
 .ok{color:#7ecb8f}
 .none{color:var(--dim);grid-column:1/-1;text-align:center;padding:40px}
 .saved{color:var(--dim);font-size:12px}
+#hist{position:absolute;top:8px;left:8px;width:250px;max-height:calc(100% - 16px);display:flex;flex-direction:column;gap:8px;padding:8px;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 6px 24px #000a;z-index:4}
+#histList{overflow-y:auto;display:flex;flex-direction:column;gap:2px}
+.h{display:flex;justify-content:space-between;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer;border:1px solid transparent}
+.h:hover{background:var(--panel2)}
+.h.cur{background:var(--panel2);border-color:var(--accent)}
+.h.undone{opacity:.45}
+.h small{color:var(--dim)}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -95,6 +102,8 @@ body.home #right{display:none}
     <button data-tool="cut" title="Drag the three dots to shape the neckline (N)">Neckline</button>
     <label>Brush <input type="range" id="brush" min="3" max="120" value="24"></label>
     <button id="undo" title="Undo (Ctrl+Z)" disabled>Undo</button>
+    <button id="redoStep" title="Redo (Ctrl+Y)" disabled>Redo</button>
+    <button id="histBtn" title="Every step since you opened this photo. Click one to go back to it.">History</button>
     <div class="sep"></div>
     <button data-view="overlay" title="Photo with the shape tinted">Overlay</button>
     <button data-view="shape" title="The finished black shape">Shape</button>
@@ -123,6 +132,10 @@ body.home #right{display:none}
         </ul>
         <div class="private">The first photo takes longer while the cut-out model loads.</div>
       </div>
+    </div>
+    <div id="hist" hidden>
+      <div id="histList"></div>
+      <button id="resetBtn" title="Back to the first automatic cut-out and the starting settings">Reset to how it started</button>
     </div>
     <div id="gallery" hidden>
       <div id="gbar">

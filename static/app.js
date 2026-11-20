@@ -7,7 +7,7 @@ const tint = document.createElement("canvas"), tctx = tint.getContext("2d");
 const prefs = Object.assign({ ornD: 3, height: 2.25, quality: "best", border: "none", space: 0, grid: false }, readPrefs());
 let items = [], cur = null, photo = null, outlinePath = null;
 let view = { s: 1, x: 0, y: 0 }, tool = "add", mode = "overlay";
-let undoStack = [], drag = null, space = false, pointer = null, raf = 0, loadToken = 0;
+let drag = null, space = false, pointer = null, raf = 0, loadToken = 0;
 let queue = Promise.resolve(); // server calls run one after another, so the last answer is the newest
 
 function readPrefs() { try { return JSON.parse(localStorage.getItem("prefs") || "{}"); } catch { return {}; } }
@@ -122,8 +122,8 @@ $("list").addEventListener("click", (e) => {
 function loadImage(url) {
   return new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = url; });
 }
-async function loadMask(it) {
-  const im = await loadImage(`/api/items/${it.id}/mask?t=${Date.now()}`);
+async function loadMask(it) { putMask(await loadImage(`/api/items/${it.id}/mask?t=${Date.now()}`), it); }
+function putMask(im, it) { // a black-and-white picture -> the editable shape
   mask.width = tint.width = it.w; mask.height = tint.height = it.h;
   mctx.globalCompositeOperation = "source-over";
   mctx.drawImage(im, 0, 0);
@@ -147,7 +147,7 @@ async function open(it, token) {
   cur = it; photo = im;
   if (location.hash !== "#" + it.id) history.pushState(null, "", "#" + it.id); // Back closes; a reload reopens
   await loadMask(it);
-  undoStack = []; $("undo").disabled = true;
+  await startHist("As opened");
   renderList(); fillPanel(); showOutline(); resize(); fit();
 }
 
@@ -202,14 +202,17 @@ function bind(id, ev, fn) { $(id).addEventListener(ev, (e) => { if (cur) fn(e.ta
 bind("name", "input", (t) => { cur.name = t.value; pushSettings(400); });
 bind("height", "change", (t) => {
   const v = Math.min(24, Math.max(0.25, +t.value || 2.25));
-  t.value = v; cur.settings.height_in = prefs.height = v; savePrefs(); pushSettings(0);
+  t.value = v; cur.settings.height_in = prefs.height = v; savePrefs(); pushSettings(0); record("Size");
 });
 bind("ornD", "change", (t) => { prefs.ornD = Math.min(24, Math.max(0.5, +t.value || 3)); t.value = prefs.ornD; savePrefs(); showOutline(); });
 bind("done", "change", (t) => { cur.done = t.checked; pushSettings(0); });
-bind("flip", "change", (t) => { cur.settings.flip = t.checked; pushSettings(0); });
-bind("cutOn", "change", (t) => { cur.settings.cut_on = t.checked; pushSettings(0); draw(); });
+bind("flip", "change", (t) => { cur.settings.flip = t.checked; pushSettings(0); record("Face the other way"); });
+bind("cutOn", "change", (t) => { cur.settings.cut_on = t.checked; pushSettings(0); draw(); record(t.checked ? "Neckline on" : "Neckline off"); });
+bind("tilt", "change", () => record("Straighten")); // "change" fires once, when the slider is let go
+bind("smooth", "change", () => record("Smoothing"));
+bind("detail", "change", () => record("Thinnest detail"));
 bind("tilt", "input", (t) => { cur.settings.tilt_deg = +t.value; labels(); draw(); pushSettings(); });
-bind("tilt", "dblclick", (t) => { t.value = 0; cur.settings.tilt_deg = 0; labels(); draw(); pushSettings(0); });
+bind("tilt", "dblclick", (t) => { t.value = 0; cur.settings.tilt_deg = 0; labels(); draw(); pushSettings(0); record("Straighten"); });
 bind("smooth", "input", (t) => { cur.settings.smooth = +t.value; labels(); pushSettings(); });
 bind("detail", "input", (t) => { cur.settings.detail_mm = +t.value; labels(); pushSettings(); });
 $("border").addEventListener("change", (e) => { prefs.border = e.target.value; $("space").disabled = prefs.border === "circle"; savePrefs(); });
@@ -227,12 +230,12 @@ async function download(url) {
 $("svgBtn").onclick = () => download(`/api/items/${cur.id}/export.svg?${exportQuery()}`);
 $("pngBtn").onclick = () => download(`/api/items/${cur.id}/export.png?${exportQuery()}`);
 $("redo").onclick = () => {
-  if (!confirm("Run the automatic cut-out again? Brush edits on this photo will be lost.")) return;
+  if (!confirm("Run the automatic cut-out again? It replaces your brush edits and becomes the new starting point. (History can still take you back while this photo is open.)")) return;
   const it = cur;
   busy("Cutting out again…");
   enqueue(async () => {
     it.outline = await api("POST", `/api/items/${it.id}/redo`, { quality: prefs.quality });
-    if (it === cur) { await loadMask(it); undoStack = []; $("undo").disabled = true; showOutline(); }
+    if (it === cur) { await loadMask(it); showOutline(); pushHist("New cut-out", await maskBlob(), JSON.stringify(it.settings)); }
     busy(it.outline.note || "", 8000);
   });
 };
@@ -374,20 +377,87 @@ function dab(a, b) {
   mctx.lineWidth = +$("brush").value / view.s;
   mctx.beginPath(); mctx.moveTo(a.x, a.y); mctx.lineTo(b.x + 0.01, b.y + 0.01); mctx.stroke();
 }
-function saveMask() {
+function maskBlob() { // the painted shape as a small black-and-white PNG
+  const c = document.createElement("canvas");
+  c.width = mask.width; c.height = mask.height;
+  const x = c.getContext("2d");
+  x.fillStyle = "#000"; x.fillRect(0, 0, c.width, c.height);
+  x.drawImage(mask, 0, 0);
+  return new Promise((res) => c.toBlob(res, "image/png"));
+}
+
+/* ---------- history ----------
+   One entry per step since the photo was opened: the shape (a PNG, a few tens
+   of KB) and the settings. hist[hi] is where you are; later ones are undone. */
+let hist = [], hi = -1;
+const HIST_MAX = 100;
+function pushHist(label, blob, settings) {
+  hist.length = hi + 1; // a new step drops the undone ones
+  hist.push({ label, blob, settings, t: new Date() });
+  if (hist.length > HIST_MAX) hist.splice(1, 1); // the first entry always stays
+  hi = hist.length - 1;
+  renderHist();
+}
+async function startHist(label) {
+  hist = []; hi = -1;
+  pushHist(label, await maskBlob(), JSON.stringify(cur.settings));
+}
+function record(label) { // a step that changed settings only
+  const it = cur, settings = JSON.stringify(it.settings);
+  enqueue(async () => { if (it === cur && hi >= 0) pushHist(label, hist[hi].blob, settings); });
+}
+function commitMask(label) { // a brush stroke: remember it and save it
   const it = cur;
   enqueue(async () => {
-    const c = document.createElement("canvas");
-    c.width = it.w; c.height = it.h;
-    const x = c.getContext("2d");
-    x.fillStyle = "#000"; x.fillRect(0, 0, c.width, c.height);
     if (it !== cur) return; // the shared mask canvas now holds another photo
-    x.drawImage(mask, 0, 0);
-    const blob = await new Promise((res) => c.toBlob(res, "image/png"));
+    const blob = await maskBlob();
+    pushHist(label, blob, JSON.stringify(it.settings));
     it.outline = await api("PUT", `/api/items/${it.id}/mask`, blob);
     if (it === cur) showOutline(); else renderList();
   });
 }
+function goTo(i, relative = false) { // relative: i steps from wherever we are when its turn comes
+  const it = cur;
+  enqueue(async () => {
+    if (relative) i += hi; // worked out here, so quick repeated Undo presses each count
+    if (it !== cur || i < 0 || i >= hist.length || i === hi) return;
+    const st = hist[i], maskChanged = st.blob !== hist[hi].blob;
+    hi = i;
+    if (maskChanged) {
+      putMask(await createImageBitmap(st.blob), it);
+      await api("PUT", `/api/items/${it.id}/mask`, st.blob);
+    }
+    it.settings = JSON.parse(st.settings);
+    it.outline = (await api("PATCH", `/api/items/${it.id}`, { settings: it.settings })).outline;
+    if (it === cur) { fillPanel(); showOutline(); renderHist(); } else renderList();
+  });
+}
+function renderHist() {
+  $("undo").disabled = hi <= 0;
+  $("redoStep").disabled = hi >= hist.length - 1;
+  $("histBtn").textContent = hist.length > 1 ? `History (${hist.length - 1})` : "History";
+  $("histList").innerHTML = hist.map((h, i) =>
+    `<div class="h${i === hi ? " cur" : i > hi ? " undone" : ""}" data-i="${i}"><span>${i ? i + ". " : ""}${esc(h.label)}</span>` +
+    `<small>${h.t.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</small></div>`).reverse().join("");
+}
+function showHist(on) { $("hist").hidden = !on; $("histBtn").classList.toggle("on", on); }
+$("histBtn").onclick = () => showHist($("hist").hidden);
+$("histList").addEventListener("click", (e) => { const el = e.target.closest(".h"); if (el) goTo(+el.dataset.i); });
+$("redoStep").onclick = () => goTo(1, true);
+$("resetBtn").onclick = () => {
+  if (!confirm("Put this photo back to its first automatic cut-out and starting settings? (History can still take you back while this photo is open.)")) return;
+  const it = cur;
+  busy("Putting it back…");
+  enqueue(async () => {
+    const r = await api("POST", `/api/items/${it.id}/reset`, { quality: prefs.quality });
+    Object.assign(it, r, { name: it.name, done: it.done });
+    if (it === cur) {
+      await loadMask(it); fillPanel(); showOutline();
+      pushHist("Reset to how it started", await maskBlob(), JSON.stringify(it.settings));
+    } else renderList();
+    busy(r.note || "", 8000);
+  });
+};
 cv.addEventListener("contextmenu", (e) => e.preventDefault());
 cv.addEventListener("pointerdown", (e) => {
   if (!cur) return;
@@ -402,10 +472,7 @@ cv.addEventListener("pointerdown", (e) => {
     else drag = { kind: "pan", cx: e.clientX, cy: e.clientY, x: view.x, y: view.y };
     return;
   }
-  undoStack.push(mctx.getImageData(0, 0, mask.width, mask.height));
-  if (undoStack.length > 10) undoStack.shift();
-  $("undo").disabled = false;
-  drag = { kind: "paint", last: toPhoto(p) };
+  drag = { kind: "paint", last: toPhoto(p), label: tool === "add" ? "Add" : "Erase" };
   dab(drag.last, drag.last); draw();
 });
 cv.addEventListener("pointermove", (e) => {
@@ -421,8 +488,8 @@ cv.addEventListener("pointermove", (e) => {
   draw();
 });
 function endDrag() {
-  if (drag?.kind === "paint") saveMask();
-  if (drag?.kind === "cut") pushSettings(0);
+  if (drag?.kind === "paint") commitMask(drag.label);
+  if (drag?.kind === "cut") { pushSettings(0); record("Neckline"); }
   drag = null;
 }
 cv.addEventListener("pointerup", endDrag);
@@ -437,12 +504,7 @@ cv.addEventListener("wheel", (e) => {
   draw();
 }, { passive: false });
 
-function undo() {
-  if (!cur || !undoStack.length) return;
-  mctx.putImageData(undoStack.pop(), 0, 0);
-  $("undo").disabled = !undoStack.length;
-  saveMask(); draw();
-}
+function undo() { if (cur) goTo(-1, true); }
 $("undo").onclick = undo;
 $("close").onclick = () => select(null);
 function setGrid(on) { prefs.grid = on; savePrefs(); $("gridBtn").classList.toggle("on", on); draw(); }
@@ -461,7 +523,7 @@ $("rotR").onclick = () => rotate(1);
 
 function setTool(t) {
   tool = t;
-  if (t === "cut" && cur && !cur.settings.cut_on) { cur.settings.cut_on = true; $("cutOn").checked = true; pushSettings(0); }
+  if (t === "cut" && cur && !cur.settings.cut_on) { cur.settings.cut_on = true; $("cutOn").checked = true; pushSettings(0); record("Neckline on"); }
   document.querySelectorAll("[data-tool]").forEach((b) => b.classList.toggle("on", b.dataset.tool === tool));
   $("brush").disabled = t === "cut";
   cv.style.cursor = t === "cut" ? "grab" : "none";
@@ -478,10 +540,12 @@ $("brush").addEventListener("input", draw);
 
 addEventListener("keydown", (e) => {
   if (/^(text|number)$/.test(e.target.type || "")) return;
+  if (e.key === "Escape" && !$("hist").hidden) { showHist(false); return; }
   if (e.key === "Escape" && cur) { select(null); return; }
   if (e.code === "Space") { space = true; e.preventDefault(); draw(); return; }
   const k = e.key.toLowerCase();
-  if ((e.ctrlKey || e.metaKey) && k === "z") { e.preventDefault(); undo(); }
+  if ((e.ctrlKey || e.metaKey) && (k === "y" || (k === "z" && e.shiftKey))) { e.preventDefault(); if (cur) goTo(1, true); }
+  else if ((e.ctrlKey || e.metaKey) && k === "z") { e.preventDefault(); undo(); }
   else if (e.ctrlKey || e.metaKey || e.altKey) return;
   else if (k === "g") setGrid(!prefs.grid);
   else if (k === "b") setTool("add");

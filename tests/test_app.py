@@ -96,6 +96,34 @@ def test_sideways_photo_is_stood_up_and_can_be_turned(client, monkeypatch):
     assert saved.size == (800, 600)
 
 
+def test_reset_goes_back_to_the_first_cut_out(client):
+    it = add(client)
+    url = f"/api/items/{it['id']}"
+    start = (server.DATA / it["id"] / "mask.png").read_bytes()
+
+    blank = io.BytesIO()
+    Image.new("L", (it["w"], it["h"]), 0).save(blank, "PNG")  # everything erased
+    assert client.put(url + "/mask", base_url=BASE, data=blank.getvalue()).get_json()["bbox"] is None
+    client.patch(url, base_url=BASE, json={"name": "Kept", "settings": {"height_in": 3, "tilt_deg": 12, "flip": True}})
+
+    r = client.post(url + "/reset", base_url=BASE, json={}).get_json()
+    assert (server.DATA / it["id"] / "mask.png").read_bytes() == start
+    assert r["outline"]["bbox"] and r["name"] == "Kept"
+    s = r["settings"]
+    assert (s["tilt_deg"], s["flip"], s["height_in"]) == (0.0, False, 3)  # the size is kept
+
+
+def test_reset_follows_a_turn_and_works_for_older_photos(client):
+    it = add(client)
+    d = server.DATA / it["id"]
+    client.post(f"/api/items/{it['id']}/rotate", base_url=BASE, json={"turns": 1})
+    assert Image.open(d / "start.png").size == Image.open(d / "photo.jpg").size == (it["h"], it["w"])
+
+    (d / "start.png").unlink()  # a photo added before the starting copy was kept
+    r = client.post(f"/api/items/{it['id']}/reset", base_url=BASE, json={"quality": "fast"})
+    assert r.status_code == 200 and (d / "start.png").exists()
+
+
 def test_zip_and_sheet_take_the_chosen_photos(client):
     a, b, c = add(client), add(client), add(client, name="Ben.jpg")
     z = client.get(f"/api/svgs.zip?ids={a['id']},{b['id']},{c['id']}", base_url=BASE)

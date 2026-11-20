@@ -73,7 +73,13 @@ otherwise the app falls back to *Fast*.
 2. Click a card to open it. **← Gallery**, Esc or the browser's Back closes it.
 3. Tidy up if needed:
    - **Add / Erase** (B / E) paint the shape in or away. Scroll to zoom, hold
-     Space to move, **Undo** is Ctrl+Z.
+     Space to move.
+   - **Undo** (Ctrl+Z) and **Redo** (Ctrl+Y) step through up to 100 changes,
+     brush strokes and settings alike. **History** lists every step since you
+     opened the photo; click one to go back to it. The list starts fresh each
+     time a photo is opened.
+   - **Reset to how it started** (in History) puts back the first automatic
+     cut-out and the starting settings, at any time, even days later.
    - **⟲ Turn / Turn ⟳** and **Straighten** fix a sideways or tilted photo;
      **Grid** (G) shows lines to straighten against.
    - **Neckline** (N): drag the three dots.
