@@ -8,6 +8,7 @@ const prefs = Object.assign({ ornD: 3, height: 2.25, quality: "best", border: "n
 let items = [], cur = null, photo = null, outlinePath = null;
 let view = { s: 1, x: 0, y: 0 }, tool = "add", mode = "overlay";
 let drag = null, space = false, pointer = null, raf = 0, loadToken = 0;
+let tintStale = true, tintMode = "";
 let queue = Promise.resolve(); // server calls run one after another, so the last answer is the newest
 
 function readPrefs() { try { return JSON.parse(localStorage.getItem("prefs") || "{}"); } catch { return {}; } }
@@ -17,12 +18,14 @@ async function api(method, url, body) {
   const opt = { method };
   if (body instanceof Blob || body instanceof FormData) opt.body = body;
   else if (body) { opt.body = JSON.stringify(body); opt.headers = { "Content-Type": "application/json" }; }
-  const r = await fetch(url, opt);
+  let r;
+  try { r = await fetch(url, opt); }
+  catch { throw new Error("Silhouette Maker is not running. Start it again, then reload this page."); }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || `Something went wrong (${r.status}).`);
   return data;
 }
-function enqueue(fn) { queue = queue.then(fn).catch((e) => busy(e.message, 4000)); return queue; }
+function enqueue(fn) { queue = queue.then(fn).catch((e) => busy(e.message, 6000)); return queue; }
 
 let busyTimer = 0;
 function busy(text, ms) {
@@ -41,9 +44,13 @@ function thumb(it) {
   const w = b[2] - b[0], h = b[3] - b[1], p = Math.max(w, h) * 0.08, m = Math.max(w, h) + 2 * p;
   return `<svg viewBox="${b[0] - (m - w) / 2} ${b[1] - (m - h) / 2} ${m} ${m}"><path fill-rule="evenodd" transform="${flipT(it)}" d="${it.outline.d}"/></svg>`;
 }
+function kidHtml(it) { return `<div class="kid${it === cur ? " sel" : ""}" data-id="${it.id}">${thumb(it)}<span>${esc(it.name)}</span></div>`; }
+function refreshItem(it) { // one child changed: redraw only its entry
+  const el = $("list").querySelector(`[data-id="${it.id}"]`);
+  if (el) el.outerHTML = kidHtml(it); else renderList();
+}
 function renderList() {
-  $("list").innerHTML = items.map((it) =>
-    `<div class="kid${it === cur ? " sel" : ""}" data-id="${it.id}">${thumb(it)}<span>${esc(it.name)}</span></div>`).join("");
+  $("list").innerHTML = items.map(kidHtml).join("");
   $("empty").hidden = items.length > 0;
   for (const id of ["bar", "panel", "hint"]) $(id).hidden = !cur;
   $("gallery").hidden = !!cur || !items.length;
@@ -78,6 +85,7 @@ function renderGallery() {
   $("gSheet").textContent = n ? `Sheet of ${n}` : "Sheet of all";
   $("gDel").textContent = n ? `Delete ${n}` : "Delete";
   $("gDel").disabled = $("gDone").disabled = !n;
+  $("gDone").textContent = n && targets().every((it) => it.done) ? "Mark not finished" : "Mark finished";
   $("gZip").disabled = $("gSheet").disabled = !targets().some((it) => it.outline.bbox);
 }
 $("grid").addEventListener("click", (e) => {
@@ -130,6 +138,7 @@ function putMask(im, it) { // a black-and-white picture -> the editable shape
   const d = mctx.getImageData(0, 0, it.w, it.h), a = d.data;
   for (let i = 0; i < a.length; i += 4) { a[i + 3] = a[i] > 127 ? 255 : 0; a[i] = a[i + 1] = a[i + 2] = 255; }
   mctx.putImageData(d, 0, 0);
+  tintStale = true;
 }
 async function select(it) {
   const token = ++loadToken;
@@ -138,6 +147,7 @@ async function select(it) {
     if (location.hash) history.pushState(null, "", location.pathname); // so Back reopens it
     return;
   }
+  flushSettings();
   await queue;
   await open(it, token);
 }
@@ -186,18 +196,30 @@ function showOutline() {
     $("size").textContent = `${o.height_in.toFixed(2)} in tall × ${o.width_in.toFixed(2)} in wide` + (big ? " · may not fit the ornament" : "");
   }
   $("svgBtn").disabled = $("pngBtn").disabled = !o.bbox;
-  renderList(); draw();
+  refreshItem(cur); draw();
 }
-let patchTimer = 0;
+let patchTimer = 0, patchWaiting = null; // patchWaiting: the photo whose change has not been sent yet
 function pushSettings(delay = 180) {
   clearTimeout(patchTimer);
-  const it = cur;
-  patchTimer = setTimeout(() => enqueue(async () => {
+  patchWaiting = cur;
+  patchTimer = setTimeout(flushSettings, delay);
+}
+function flushSettings() { // send the waiting change now
+  clearTimeout(patchTimer);
+  const it = patchWaiting;
+  if (!it) return;
+  patchWaiting = null;
+  enqueue(async () => {
     const r = await api("PATCH", `/api/items/${it.id}`, { name: it.name, done: it.done, settings: it.settings });
     it.outline = r.outline;
     if (it === cur) showOutline(); else renderList();
-  }), delay);
+  });
 }
+addEventListener("pagehide", () => { // closing the tab mid-typing: still save it
+  const it = patchWaiting;
+  if (it) fetch(`/api/items/${it.id}`, { method: "PATCH", keepalive: true, headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: it.name, done: it.done, settings: it.settings }) });
+});
 function bind(id, ev, fn) { $(id).addEventListener(ev, (e) => { if (cur) fn(e.target); }); }
 bind("name", "input", (t) => { cur.name = t.value; pushSettings(400); });
 bind("height", "change", (t) => {
@@ -221,7 +243,7 @@ function exportQuery() { return `border=${prefs.border}&space=${prefs.space}&orn
 $("quality").addEventListener("change", (e) => { prefs.quality = e.target.value; savePrefs(); });
 
 async function download(url) {
-  clearTimeout(patchTimer);
+  flushSettings(); // the file must match what is on screen
   await queue;
   const a = document.createElement("a");
   a.href = url; a.download = "";
@@ -314,9 +336,12 @@ function render() {
   if (mode === "shape") { ctx.fillStyle = "#f4efe6"; ctx.fillRect(0, 0, cur.w, cur.h); }
   else ctx.drawImage(photo, 0, 0);
   if (mode !== "photo") {
-    tctx.globalCompositeOperation = "copy"; tctx.drawImage(mask, 0, 0);
-    tctx.globalCompositeOperation = "source-in";
-    tctx.fillStyle = mode === "shape" ? "#d3cbbd" : "#2f7df6"; tctx.fillRect(0, 0, tint.width, tint.height);
+    if (tintStale || tintMode !== mode) {
+      tctx.globalCompositeOperation = "copy"; tctx.drawImage(mask, 0, 0);
+      tctx.globalCompositeOperation = "source-in";
+      tctx.fillStyle = mode === "shape" ? "#d3cbbd" : "#2f7df6"; tctx.fillRect(0, 0, tint.width, tint.height);
+      tintStale = false; tintMode = mode;
+    }
     ctx.globalAlpha = mode === "shape" ? 1 : 0.5; ctx.drawImage(tint, 0, 0); ctx.globalAlpha = 1;
   }
   ctx.restore();
@@ -376,6 +401,7 @@ function dab(a, b) {
   mctx.strokeStyle = "#fff"; mctx.lineCap = mctx.lineJoin = "round";
   mctx.lineWidth = +$("brush").value / view.s;
   mctx.beginPath(); mctx.moveTo(a.x, a.y); mctx.lineTo(b.x + 0.01, b.y + 0.01); mctx.stroke();
+  tintStale = true;
 }
 function maskBlob() { // the painted shape as a small black-and-white PNG
   const c = document.createElement("canvas");
@@ -479,7 +505,11 @@ cv.addEventListener("pointermove", (e) => {
   if (!cur) return;
   const p = pointer = pt(e);
   if (drag?.kind === "pan") { view.x = drag.x + e.clientX - drag.cx; view.y = drag.y + e.clientY - drag.cy; }
-  else if (drag?.kind === "paint") { const q = toPhoto(p); dab(drag.last, q); drag.last = q; }
+  else if (drag?.kind === "paint") {
+    for (const ev of (e.getCoalescedEvents?.().length ? e.getCoalescedEvents() : [e])) {
+      const q = toPhoto(pt(ev)); dab(drag.last, q); drag.last = q;
+    }
+  }
   else if (drag?.kind === "cut") {
     const c = cur.settings.cut, f = [Math.min(1, Math.max(0, p.x / cur.w)), Math.min(1, Math.max(0, p.y / cur.h))];
     if (drag.i === 1) c[1] = [2 * f[0] - 0.5 * (c[0][0] + c[2][0]), 2 * f[1] - 0.5 * (c[0][1] + c[2][1])];
@@ -539,7 +569,7 @@ document.querySelectorAll("[data-view]").forEach((b) => (b.onclick = () => setMo
 $("brush").addEventListener("input", draw);
 
 addEventListener("keydown", (e) => {
-  if (/^(text|number)$/.test(e.target.type || "")) return;
+  if (/^(text|number|select-one)$/.test(e.target.type || "")) return;
   if (e.key === "Escape" && !$("hist").hidden) { showHist(false); return; }
   if (e.key === "Escape" && cur) { select(null); return; }
   if (e.code === "Space") { space = true; e.preventDefault(); draw(); return; }
@@ -548,6 +578,7 @@ addEventListener("keydown", (e) => {
   else if ((e.ctrlKey || e.metaKey) && k === "z") { e.preventDefault(); undo(); }
   else if (e.ctrlKey || e.metaKey || e.altKey) return;
   else if (k === "g") setGrid(!prefs.grid);
+  else if (k === "f") fit();
   else if (k === "b") setTool("add");
   else if (k === "e") setTool("erase");
   else if (k === "n") setTool("cut");

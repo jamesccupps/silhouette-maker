@@ -3,13 +3,16 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import re
 import shutil
 import sys
 import threading
+import time
 import uuid
 import webbrowser
 import zipfile
+from collections import OrderedDict
 from pathlib import Path
 
 import numpy as np
@@ -18,8 +21,10 @@ from PIL import Image
 
 import engine
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 ROOT = Path(__file__).resolve().parent
+
+
 def _arg(flag, default):
     return sys.argv[sys.argv.index(flag) + 1] if flag in sys.argv else default
 
@@ -30,8 +35,12 @@ ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 
 app = Flask(__name__, static_folder=str(ROOT / "static"), static_url_path="/static")
 app.config["MAX_CONTENT_LENGTH"] = 80 * 1024 * 1024
-_cache: dict[str, tuple] = {}  # id -> (key, outline result)
+RESULTS_KEPT = 6  # full outlines (with their bitmap) kept in memory, for exports
+_cache: OrderedDict[str, tuple] = OrderedDict()  # id -> (key, outline result)
+_outlines: dict[str, tuple] = {}  # id -> (key, what the page needs of the outline)
 _cache_lock = threading.Lock()
+CSP = ("default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; "
+       "object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
 
 
 @app.before_request
@@ -42,14 +51,35 @@ def _local_only():
     origin = request.headers.get("Origin")
     if origin and origin.split("://", 1)[-1] not in ALLOWED_HOSTS:
         abort(403)
+    # a page on another site (or another local port) may not call the API
+    if request.path.startswith("/api/") and request.headers.get("Sec-Fetch-Site") in ("cross-site", "same-site"):
+        abort(403)
 
 
 @app.after_request
-def _no_store(resp):
+def _headers(resp):
     # a photo never changes once added, so the gallery may keep its pictures
     keep = request.path.endswith(("/thumb", "/photo")) and resp.status_code == 200
     resp.headers["Cache-Control"] = "private, max-age=86400" if keep else "no-store"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    resp.headers["Content-Security-Policy"] = CSP
     return resp
+
+
+@app.errorhandler(413)
+def _too_big(_e):
+    return jsonify({"error": "That file is too big (the limit is 80 MB)."}), 413
+
+
+def _num(value, lo: float, hi: float, default: float) -> float:
+    """A finite number within [lo, hi]; the default for anything else."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    return min(hi, max(lo, v)) if math.isfinite(v) else default
 
 
 def _dir(item_id: str) -> Path:
@@ -75,46 +105,86 @@ def _mask(d: Path) -> np.ndarray:
     return np.asarray(Image.open(d / "mask.png").convert("L"))
 
 
+def _key(d: Path, meta: dict) -> list:
+    """Changes whenever the shape, its settings or the outline code changes."""
+    return [(d / "mask.png").stat().st_mtime_ns, json.dumps(meta["settings"], sort_keys=True), engine.REV]
+
+
 def _result(d: Path, meta: dict) -> dict:
-    """Outline for the item's current mask + settings (cached)."""
-    key = ((d / "mask.png").stat().st_mtime_ns, json.dumps(meta["settings"], sort_keys=True))
+    """Full outline for the item's current mask + settings (a few are kept in memory)."""
+    key = _key(d, meta)
     with _cache_lock:
         hit = _cache.get(d.name)
         if hit and hit[0] == key:
+            _cache.move_to_end(d.name)
             return hit[1]
     res = engine.outline(_mask(d), meta["settings"])
     with _cache_lock:
         _cache[d.name] = (key, res)
+        _cache.move_to_end(d.name)
+        while len(_cache) > RESULTS_KEPT:
+            _cache.popitem(last=False)
     return res
 
 
 def _outline_json(d: Path, meta: dict) -> dict:
-    res = _result(d, meta)
-    if not res["loops"]:
-        return {"d": "", "bbox": None, "width_in": 0, "height_in": 0}
-    w, h = engine.size_in(res, meta["settings"])
-    return {"d": engine.path_d(res["loops"], nd=1), "bbox": res["bbox"],
-            "width_in": round(w, 3), "height_in": round(h, 3)}
+    """What the page draws. Saved next to the photo, so opening the app with a
+    full class does not trace every child again."""
+    key = _key(d, meta)
+    hit = _outlines.get(d.name)
+    if hit and hit[0] == key:
+        return hit[1]
+    saved = d / "outline.json"
+    out = None
+    try:
+        got = json.loads(saved.read_text(encoding="utf-8"))
+        if got["key"] == key:
+            out = got["outline"]
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    if out is None:
+        res = _result(d, meta)
+        if not res["loops"]:
+            out = {"d": "", "bbox": None, "width_in": 0, "height_in": 0}
+        else:
+            w, h = engine.size_in(res, meta["settings"])
+            out = {"d": engine.path_d(res["loops"], nd=1), "bbox": res["bbox"],
+                   "width_in": round(w, 3), "height_in": round(h, 3)}
+        tmp = d / "outline.json.tmp"
+        tmp.write_text(json.dumps({"key": key, "outline": out}), encoding="utf-8")
+        tmp.replace(saved)
+    _outlines[d.name] = (key, out)
+    return out
+
+
+def _added(d: Path, meta: dict) -> float:
+    return meta.get("added") or d.stat().st_ctime  # older photos have no saved time
+
+
+def _items() -> list[tuple[Path, dict]]:
+    """Every photo, oldest first."""
+    out = []
+    if DATA.is_dir():
+        for d in DATA.iterdir():
+            if (d / "meta.json").exists() and (d / "mask.png").exists():
+                out.append((d, _meta(d)))
+    return sorted(out, key=lambda dm: _added(*dm))
 
 
 def _public(d: Path, meta: dict) -> dict:
     return {"id": d.name, "name": meta["name"], "w": meta["w"], "h": meta["h"],
-            "done": bool(meta.get("done")), "added": d.stat().st_ctime, "rev": meta.get("rev", 0),
+            "done": bool(meta.get("done")), "added": _added(d, meta), "rev": meta.get("rev", 0),
             "settings": meta["settings"], "outline": _outline_json(d, meta)}
 
 
 def _chosen():
     """(name, outline, settings) for the ids in ?ids=a,b (or every photo), skipping empty shapes."""
     ids = [i for i in request.args.get("ids", "").split(",") if i]
-    dirs = [_dir(i) for i in ids] if ids else (
-        sorted(DATA.iterdir(), key=lambda p: p.stat().st_ctime) if DATA.is_dir() else [])
+    found = [(d, _meta(d)) for d in map(_dir, ids)] if ids else _items()
     out = []
-    for d in dirs:
-        if (d / "meta.json").exists() and (d / "mask.png").exists():
-            meta = _meta(d)
-            res = _result(d, meta)
-            if res["loops"]:
-                out.append((meta["name"], res, meta["settings"]))
+    for d, meta in found:
+        if _outline_json(d, meta)["bbox"]:  # cheap check first: most are saved
+            out.append((meta["name"], _result(d, meta), meta["settings"]))
     return out
 
 
@@ -134,8 +204,8 @@ def _export_opts() -> dict:
     a = request.args
     border = a.get("border", "none")
     return {"border": border if border in ("none", "rect", "circle") else "none",
-            "space": min(6.0, max(0.0, float(a.get("space") or 0))),
-            "orn": min(24.0, max(0.5, float(a.get("orn") or 3)))}
+            "space": _num(a.get("space"), 0.0, 6.0, 0.0),
+            "orn": _num(a.get("orn"), 0.5, 24.0, 3.0)}
 
 
 @app.get("/")
@@ -145,12 +215,7 @@ def index():
 
 @app.get("/api/items")
 def list_items():
-    out = []
-    if DATA.is_dir():
-        for d in sorted(DATA.iterdir(), key=lambda p: p.stat().st_ctime):
-            if (d / "meta.json").exists() and (d / "mask.png").exists():
-                out.append(_public(d, _meta(d)))
-    return jsonify(out)
+    return jsonify([_public(d, meta) for d, meta in _items()])
 
 
 @app.post("/api/items")
@@ -175,11 +240,9 @@ def add_item():
     Image.fromarray(mask).save(d / "mask.png")
     Image.fromarray(mask).save(d / "start.png")  # what "reset" goes back to
     settings = dict(engine.DEFAULT_SETTINGS, cut=engine.default_cut(mask))
-    for k in ("height_in",):
-        if request.form.get(k):
-            settings[k] = float(request.form[k])
+    settings["height_in"] = _num(request.form.get("height_in"), 0.25, 24.0, settings["height_in"])
     name = Path(f.filename or "photo").stem[:60]
-    meta = {"name": name, "w": img.width, "h": img.height, "settings": settings}
+    meta = {"name": name, "w": img.width, "h": img.height, "added": time.time(), "settings": settings}
     _save_meta(d, meta)
     return jsonify(dict(_public(d, meta), note=note))
 
@@ -209,7 +272,10 @@ def get_mask(item_id):
 def put_mask(item_id):
     d = _dir(item_id)
     meta = _meta(d)
-    img = Image.open(io.BytesIO(request.get_data())).convert("L")
+    try:
+        img = Image.open(io.BytesIO(request.get_data())).convert("L")
+    except Exception:
+        abort(400)
     if img.size != (meta["w"], meta["h"]):
         abort(400)
     arr = np.where(np.asarray(img) > 127, 255, 0).astype(np.uint8)
@@ -259,7 +325,7 @@ def rotate_item(item_id):
     """Turn the photo and its shape a quarter turn (turns: 1 = right, -1 = left, 2 = upside down)."""
     d = _dir(item_id)
     meta = _meta(d)
-    turns = int((request.get_json(silent=True) or {}).get("turns", 1))
+    turns = int(_num((request.get_json(silent=True) or {}).get("turns"), -3, 3, 1))
     img, mask = engine.turn(Image.open(d / "photo.jpg").convert("RGB"), _mask(d), -turns)
     img.save(d / "photo.jpg", quality=95)
     Image.fromarray(mask).save(d / "mask.png")
@@ -277,26 +343,27 @@ def rotate_item(item_id):
 def patch_item(item_id):
     d = _dir(item_id)
     meta = _meta(d)
-    body = request.get_json(force=True)
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        abort(400)
     if "name" in body:
         meta["name"] = str(body["name"])[:60]
     if "done" in body:
         meta["done"] = bool(body["done"])
-    s = body.get("settings") or {}
+    s = body.get("settings")
+    s = s if isinstance(s, dict) else {}
     cur = meta["settings"]
-    if "height_in" in s:
-        cur["height_in"] = min(24.0, max(0.25, float(s["height_in"])))
-    if "smooth" in s:
-        cur["smooth"] = min(10.0, max(0.0, float(s["smooth"])))
-    if "tilt_deg" in s:
-        cur["tilt_deg"] = min(45.0, max(-45.0, float(s["tilt_deg"])))
-    if "detail_mm" in s:
-        cur["detail_mm"] = min(3.0, max(0.0, float(s["detail_mm"])))
+    for k, lo, hi in (("height_in", 0.25, 24.0), ("smooth", 0.0, 10.0),
+                      ("tilt_deg", -45.0, 45.0), ("detail_mm", 0.0, 3.0)):
+        if k in s:
+            cur[k] = _num(s[k], lo, hi, cur.get(k, engine.DEFAULT_SETTINGS[k]))
     for k in ("flip", "cut_on"):
         if k in s:
             cur[k] = bool(s[k])
-    if s.get("cut"):
-        cur["cut"] = [[float(p[0]), float(p[1])] for p in s["cut"]][:3]
+    cut = s.get("cut")
+    if isinstance(cut, list) and len(cut) == 3 and all(isinstance(p, list) and len(p) == 2 for p in cut):
+        # the middle point is a pull point and may sit a little outside the photo
+        cur["cut"] = [[_num(p[0], -2.0, 3.0, 0.5), _num(p[1], -2.0, 3.0, 0.9)] for p in cut]
     _save_meta(d, meta)
     return jsonify(_public(d, meta))
 
@@ -306,6 +373,7 @@ def delete_item(item_id):
     d = _dir(item_id)
     shutil.rmtree(d)
     _cache.pop(item_id, None)
+    _outlines.pop(item_id, None)
     return jsonify({"ok": True})
 
 
@@ -332,8 +400,8 @@ def export_item(item_id, ext):
 
 @app.get("/api/sheet")
 def export_sheet():
-    w = min(24.0, max(2.0, float(request.args.get("w", 11.5))))
-    h = min(24.0, max(2.0, float(request.args.get("h", 11.5))))
+    w = _num(request.args.get("w"), 2.0, 24.0, 11.5)
+    h = _num(request.args.get("h"), 2.0, 24.0, 11.5)
     items = _chosen()
     if not items:
         abort(409)

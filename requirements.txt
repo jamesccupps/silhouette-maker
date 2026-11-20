@@ -5,5 +5,6 @@ rembg[cpu]>=2.0.60
 flask>=3.0
 opencv-python-headless>=4.8
 pillow>=10.0
+pillow-heif>=0.16  # iPhone photos (HEIC)
 numpy>=1.26
 scikit-image>=0.22

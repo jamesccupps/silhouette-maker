@@ -24,7 +24,7 @@ ornament.
 ## What it does
 
 - **Automatic cut-out** of each photo, stood upright if it was taken sideways
-  or upside down.
+  or upside down. JPEG, PNG, WebP and iPhone HEIC photos all work.
 - **Touch-up**: Add and Erase brushes with undo and zoom; turn and straighten;
   a grid to line things up.
 - **Neckline**: three dots shape the bottom of the bust.
@@ -52,6 +52,10 @@ to 3.13.
 and uses **Fast**, which runs on any CPU in about a second and is rougher
 around hair.
 
+While it is cutting out, the *Best* model uses about 10 GB of graphics memory.
+It is let go 90 seconds after the last cut-out, so the app is light the rest of
+the time; the next photo after a pause takes about 10 seconds longer.
+
 ### Linux and macOS
 
 Not tested. It should run with:
@@ -73,7 +77,9 @@ otherwise the app falls back to *Fast*.
 2. Click a card to open it. **← Gallery**, Esc or the browser's Back closes it.
 3. Tidy up if needed:
    - **Add / Erase** (B / E) paint the shape in or away. Scroll to zoom, hold
-     Space to move.
+     Space to move, **Fit** (F) shows the whole photo again.
+   - **Cut out again** reruns the automatic cut-out with the model chosen next
+     to it, if the first try missed.
    - **Undo** (Ctrl+Z) and **Redo** (Ctrl+Y) step through up to 100 changes,
      brush strokes and settings alike. **History** lists every step since you
      opened the photo; click one to go back to it. The list starts fresh each

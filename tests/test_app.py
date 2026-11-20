@@ -133,3 +133,69 @@ def test_zip_and_sheet_take_the_chosen_photos(client):
     assert sheet.data.count(b"<path") == 2
     assert client.get("/api/sheet", base_url=BASE).data.count(b"<path") == 3
     assert client.get("/api/sheet?ids=000000000000", base_url=BASE).status_code == 404
+
+
+def test_nonsense_numbers_never_reach_the_settings(client):
+    it = add(client)
+    url = f"/api/items/{it['id']}"
+    r = client.patch(url, base_url=BASE, json={"settings": {
+        "height_in": "NaN", "smooth": "lots", "tilt_deg": 1e999, "detail_mm": None,
+        "cut": [[0.1, "x"], [float("inf"), 0.9], [0.9, 0.8]]}})
+    s = r.get_json()["settings"]
+    assert (s["height_in"], s["smooth"], s["tilt_deg"], s["detail_mm"]) == (2.25, 3.0, 0.0, 0.5)
+    assert all(-2 <= v <= 3 for point in s["cut"] for v in point)
+    assert client.patch(url, base_url=BASE, json=["not", "an", "object"]).status_code == 400
+    assert client.get(url + "/export.svg?space=abc&orn=nan", base_url=BASE).status_code == 200
+    assert client.get("/api/sheet?w=wide", base_url=BASE).status_code == 200
+    r = client.post("/api/items", base_url=BASE, data={**photo(), "quality": "fast", "height_in": "tall"},
+                    content_type="multipart/form-data")
+    assert r.get_json()["settings"]["height_in"] == 2.25
+
+
+def test_a_mask_that_is_not_a_picture_is_refused(client):
+    it = add(client)
+    r = client.put(f"/api/items/{it['id']}/mask", base_url=BASE, data=b"definitely not a png")
+    assert r.status_code == 400
+    assert client.get("/api/items", base_url=BASE).get_json()[0]["outline"]["bbox"]  # untouched
+
+
+def test_outline_is_saved_so_reopening_does_not_trace_again(client, monkeypatch):
+    it = add(client)
+    assert (server.DATA / it["id"] / "outline.json").exists()
+    server._cache.clear()
+    server._outlines.clear()  # as after closing and starting the app again
+
+    def boom(*a, **k):
+        raise AssertionError("traced again")
+
+    monkeypatch.setattr(engine, "outline", boom)
+    again = client.get("/api/items", base_url=BASE).get_json()[0]
+    assert again["outline"] == it["outline"]
+
+    monkeypatch.setattr(engine, "REV", engine.REV + 1)  # new outline code: saved ones are stale
+    server._outlines.clear()
+    traced = []
+    monkeypatch.setattr(engine, "outline", lambda m, s: traced.append(1) or {"loops": [], "bbox": None, "final": m})
+    client.get("/api/items", base_url=BASE)
+    assert traced == [1]
+
+
+def test_pages_on_other_sites_cannot_call_the_api(client):
+    it = add(client)
+    for site in ("cross-site", "same-site"):
+        r = client.get("/api/items", base_url=BASE, headers={"Sec-Fetch-Site": site})
+        assert r.status_code == 403
+        r = client.delete(f"/api/items/{it['id']}", base_url=BASE, headers={"Sec-Fetch-Site": site})
+        assert r.status_code == 403
+    ok = client.get("/api/items", base_url=BASE, headers={"Sec-Fetch-Site": "same-origin"})
+    assert ok.status_code == 200 and len(ok.get_json()) == 1
+    assert ok.headers["X-Content-Type-Options"] == "nosniff"
+    assert "frame-ancestors 'none'" in ok.headers["Content-Security-Policy"]
+    # a link to the page itself from elsewhere still opens it
+    assert client.get("/", base_url=BASE, headers={"Sec-Fetch-Site": "cross-site"}).status_code == 200
+
+
+def test_photos_keep_the_order_they_were_added(client):
+    names = [add(client, name=f"{n}.jpg")["name"] for n in ("c", "a", "b")]
+    got = client.get("/api/items", base_url=BASE).get_json()
+    assert [g["name"] for g in got] == names and got[0]["added"] <= got[1]["added"] <= got[2]["added"]

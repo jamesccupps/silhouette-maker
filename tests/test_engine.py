@@ -126,3 +126,37 @@ def test_sheets_keep_every_piece_on_the_mat():
         for d in re.findall(r' d="([^"]+)"', sheet):
             nums = [float(v) for v in re.findall(r"[\d.-]+", d)]
             assert min(nums) > -4 and max(nums) < 11.5 * 72 + 4  # control points bow out a little
+
+
+def test_specks_inside_are_filled_but_real_gaps_stay():
+    m = bust()
+    s = settings(m, cut_on=False)
+    clean = engine.outline(m, s)
+    speckled = m.copy()
+    for x, y in ((430, 380), (470, 420), (400, 460)):
+        cv2.circle(speckled, (x, y), 6, 0, -1)  # what a cut-out model leaves inside a head
+    assert len(engine.outline(speckled, s)["loops"]) > 1  # left alone, each speck would be cut
+    assert len(engine.outline(engine.clean_cutout(speckled), s)["loops"]) == len(clean["loops"]) == 1
+    gap = m.copy()
+    cv2.circle(gap, (450, 430), 70, 0, -1)  # a real opening, like between a ponytail and the neck
+    assert len(engine.outline(engine.clean_cutout(gap), s)["loops"]) == 2
+    # a small gap erased by hand after the cut-out is the user's choice and stays
+    by_hand = engine.clean_cutout(m)
+    cv2.circle(by_hand, (450, 430), 12, 0, -1)
+    assert len(engine.outline(by_hand, s)["loops"]) == 2
+
+
+def test_idle_models_are_let_go():
+    engine._sessions["pretend"] = object()
+    engine.release_models()
+    assert engine._sessions == {}
+
+
+def test_iphone_heic_photo_opens(tmp_path):
+    pytest.importorskip("pillow_heif")
+    from PIL import Image
+
+    f = tmp_path / "IMG_0001.HEIC"
+    Image.new("RGB", (640, 480), (180, 170, 160)).save(f, format="HEIF")
+    img = engine.load_photo(f)
+    assert img.mode == "RGB" and img.size == (640, 480)

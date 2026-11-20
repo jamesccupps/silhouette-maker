@@ -1,11 +1,11 @@
 """Silhouette engine: local cut-out, cleanup, smooth outline, cut files.
 
 Everything here runs on this computer. The only network use is rembg's
-one-time download of the model file itself (to ~/.u2net); photos are never sent
-anywhere.
+one-time download of the model file itself; photos are never sent anywhere.
 """
 from __future__ import annotations
 
+import gc
 import threading
 
 import cv2
@@ -13,7 +13,18 @@ import numpy as np
 from PIL import Image, ImageOps
 from skimage import measure
 
+try:  # iPhone photos (HEIC); optional
+    from pillow_heif import register_heif_opener
+
+    register_heif_opener()
+except Exception:  # pragma: no cover - the app works without it
+    pass
+
+REV = 2  # raise when outline() changes its result, so saved outlines are redone
 WORK_MAX = 2000  # longest side of the working photo, px
+# A loaded model is let go after this long unused. The best one holds about
+# 10 GB of graphics memory while loaded; loading it again costs about 10 s.
+IDLE_SECONDS = 90
 UNITS_PER_INCH = 72.0  # Cricut Design Space reads SVG numbers as 72 per inch
 
 MODELS = {
@@ -33,6 +44,23 @@ DEFAULT_SETTINGS = {
 
 _sessions: dict[str, object] = {}
 _lock = threading.Lock()
+_idle: threading.Timer | None = None
+
+
+def release_models() -> None:
+    """Forget the loaded models. The next cut-out loads what it needs again."""
+    with _lock:
+        _sessions.clear()
+    gc.collect()
+
+
+def _arm_idle() -> None:
+    global _idle
+    if _idle:
+        _idle.cancel()
+    _idle = threading.Timer(IDLE_SECONDS, release_models)
+    _idle.daemon = True
+    _idle.start()
 
 
 def load_photo(fp) -> Image.Image:
@@ -63,10 +91,18 @@ def segment(img: Image.Image, quality: str = "best") -> tuple[np.ndarray, str]:
                 _sessions.pop(name, None)
                 if i == len(tries) - 1:
                     raise
+    _arm_idle()
     arr = np.asarray(mask.convert("L"))
     if arr.shape[:2] != (img.height, img.width):
         arr = cv2.resize(arr, (img.width, img.height), interpolation=cv2.INTER_LINEAR)
-    return np.where(arr > 127, 255, 0).astype(np.uint8), name
+    return clean_cutout(np.where(arr > 127, 255, 0).astype(np.uint8)), name
+
+
+def clean_cutout(mask: np.ndarray) -> np.ndarray:
+    """Tidy a model's mask once, before anyone edits it: fill the specks it
+    leaves inside the head. Done here and not in outline(), so a small gap the
+    user erases on purpose is never filled back in."""
+    return _fill_small_holes(mask, 0.003)
 
 
 def turn(img: Image.Image, mask: np.ndarray, k: int):
@@ -101,6 +137,28 @@ def _largest(binary: np.ndarray) -> np.ndarray:
         return binary
     keep = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
     return np.where(labels == keep, 255, 0).astype(np.uint8)
+
+
+def _fill_small_holes(binary: np.ndarray, frac: float) -> np.ndarray:
+    """Fill enclosed holes smaller than frac of the shape's area.
+
+    Cut-out models leave specks inside a head; each would be cut as a tiny hole.
+    Bigger gaps (between a ponytail and the neck) are real and stay."""
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(cv2.bitwise_not(binary), connectivity=4)
+    if n <= 2:
+        return binary
+    h, w = binary.shape
+    limit = frac * int(np.count_nonzero(binary))
+    small = [i for i in range(1, n)
+             if stats[i, cv2.CC_STAT_AREA] < limit
+             and stats[i, cv2.CC_STAT_LEFT] > 0 and stats[i, cv2.CC_STAT_TOP] > 0
+             and stats[i, cv2.CC_STAT_LEFT] + stats[i, cv2.CC_STAT_WIDTH] < w
+             and stats[i, cv2.CC_STAT_TOP] + stats[i, cv2.CC_STAT_HEIGHT] < h]
+    if not small:
+        return binary
+    out = binary.copy()
+    out[np.isin(labels, small)] = 255
+    return out
 
 
 def _bbox(binary: np.ndarray):
