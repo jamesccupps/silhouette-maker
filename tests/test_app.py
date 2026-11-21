@@ -448,3 +448,23 @@ def test_this_computer_can_be_examined():
     assert hw["runtime"] in ("nvidia", "directml", "cpu") and hw["gpu_runtime"] == (hw["runtime"] != "cpu")
     assert engine.cuda_works() in (True, False) and (engine.runtime() == "nvidia" or not engine.cuda_works())
     assert hw["gpu"] is None or isinstance(hw["gpu"], str)
+
+
+@pytest.mark.parametrize("error, says", [
+    (RuntimeError("bad allocation at C:\\secret\\path"), "ran out of memory"),
+    (OSError("getaddrinfo failed for github.com"), "could not be downloaded"),
+    (ValueError("something odd in C:\\secret\\path"), "Silhouette Maker window"),
+])
+def test_a_failed_cutout_gives_a_fixed_reason_not_the_error(client, monkeypatch, capsys, error, says):
+    def fail(img, quality):
+        raise error
+    monkeypatch.setattr(server, "_cut_out", fail)
+    buf = io.BytesIO()
+    Image.new("RGB", (60, 80), "white").save(buf, "JPEG")
+    buf.seek(0)
+    r = client.post("/api/items", base_url=BASE, data={"photo": (buf, "a.jpg")},
+                    content_type="multipart/form-data")
+    assert r.status_code == 500
+    msg = r.get_json()["error"]
+    assert says in msg and "secret" not in msg and "github.com" not in msg
+    assert str(error) in capsys.readouterr().err      # the detail is in the app's window

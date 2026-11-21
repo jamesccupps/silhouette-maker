@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import uuid
 import webbrowser
 import zipfile
@@ -85,6 +86,22 @@ def _num(value, lo: float, hi: float, default: float) -> float:
     except (TypeError, ValueError):
         return default
     return min(hi, max(lo, v)) if math.isfinite(v) else default
+
+
+def _cutout_failed(e: Exception):
+    """The answer when the cut-out model fails. The page gets one of a few fixed
+    reasons; the error itself goes to the app's window, never into the answer."""
+    traceback.print_exception(type(e), e, e.__traceback__, file=sys.stderr)
+    text = f"{type(e).__name__} {e}".lower()
+    if any(w in text for w in ("alloc", "memory")):
+        why = ("The cut-out model ran out of memory. Close other programs that use the graphics card, "
+               "or pick Fast instead of Best.")
+    elif any(w in text for w in ("urlopen", "connection", "getaddrinfo", "timed out", "timeout", "http", "ssl")):
+        why = ("The cut-out model could not be downloaded. Check the internet connection and try again: "
+               "it is downloaded once, then kept on this computer.")
+    else:
+        why = "The cut-out model could not run. The reason is written in the Silhouette Maker window."
+    return jsonify({"error": why}), 500
 
 
 def _dir(item_id: str) -> Path:
@@ -304,7 +321,7 @@ def add_item():
     try:
         mask, note = _cut_out(img, quality)
     except Exception as e:  # model missing and no internet, out of memory, ...
-        return jsonify({"error": f"The cut-out model could not run: {str(e)[:200]}"}), 500
+        return _cutout_failed(e)
     img, mask = engine.turn(img, mask, engine.upright_turns(mask))  # upside-down or sideways photos
     item_id = uuid.uuid4().hex[:12]
     d = DATA / item_id
@@ -372,7 +389,7 @@ def redo_cutout(item_id):
     try:
         mask, note = _cut_out(Image.open(d / "photo.jpg").convert("RGB"), quality)
     except Exception as e:
-        return jsonify({"error": f"The cut-out model could not run: {str(e)[:200]}"}), 500
+        return _cutout_failed(e)
     Image.fromarray(mask).save(d / "mask.png")
     Image.fromarray(mask).save(d / "start.png")  # a new cut-out is the new starting point
     return jsonify(dict(_outline_json(d, meta), note=note))
@@ -393,7 +410,7 @@ def reset_item(item_id):
         try:
             mask, note = _cut_out(Image.open(d / "photo.jpg").convert("RGB"), quality)
         except Exception as e:
-            return jsonify({"error": f"The cut-out model could not run: {str(e)[:200]}"}), 500
+            return _cutout_failed(e)
         Image.fromarray(mask).save(d / "start.png")
     Image.fromarray(mask).save(d / "mask.png")
     meta["settings"] = dict(engine.DEFAULT_SETTINGS, cut=engine.default_cut(mask),
