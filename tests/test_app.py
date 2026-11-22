@@ -460,7 +460,7 @@ def test_a_failed_cutout_gives_a_fixed_reason_not_the_error(client, monkeypatch,
         raise error
     monkeypatch.setattr(server, "_cut_out", fail)
     buf = io.BytesIO()
-    Image.new("RGB", (60, 80), "white").save(buf, "JPEG")
+    Image.new("RGB", (600, 800), "white").save(buf, "JPEG")
     buf.seek(0)
     r = client.post("/api/items", base_url=BASE, data={"photo": (buf, "a.jpg")},
                     content_type="multipart/form-data")
@@ -468,3 +468,36 @@ def test_a_failed_cutout_gives_a_fixed_reason_not_the_error(client, monkeypatch,
     msg = r.get_json()["error"]
     assert says in msg and "secret" not in msg and "github.com" not in msg
     assert str(error) in capsys.readouterr().err      # the detail is in the app's window
+
+
+def test_a_picture_too_small_to_cut_out_is_refused(client):
+    r = client.post("/api/items", base_url=BASE, data=photo(w=1, h=1), content_type="multipart/form-data")
+    assert r.status_code == 400 and "too small" in r.get_json()["error"]
+    r = client.post("/api/items", base_url=BASE, data=photo(w=900, h=150), content_type="multipart/form-data")
+    assert r.status_code == 400
+    assert client.get("/api/items", base_url=BASE).get_json() == []
+
+
+def test_a_class_is_traced_once_not_at_every_download(client, monkeypatch):
+    ids = [add(client, name=f"Kid{i}.jpg")["id"] for i in range(8)]  # more than the few bitmaps kept
+    calls = []
+    real = engine.outline
+    monkeypatch.setattr(engine, "outline", lambda *a, **k: calls.append(1) or real(*a, **k))
+    server._cache.clear()
+    server._curves.clear()
+    assert client.get("/api/svgs.zip", base_url=BASE).status_code == 200
+    assert len(calls) == 8
+    assert client.get("/api/svgs.zip", base_url=BASE).status_code == 200
+    assert client.get("/print", base_url=BASE).status_code == 200
+    assert len(calls) == 8                                  # nothing traced again
+    client.patch(f"/api/items/{ids[0]}", base_url=BASE, json={"settings": {"flip": True}})
+    assert client.get("/api/svgs.zip", base_url=BASE).status_code == 200
+    assert len(calls) == 9                                  # only the child that changed
+    server._cache.clear()                                   # the PNG needs the bitmap: traced again when it is gone
+    assert client.get(f"/api/items/{ids[1]}/export.png", base_url=BASE).status_code == 200
+    assert len(calls) == 10
+
+
+def test_the_tab_icon_is_served(client):
+    r = client.get("/favicon.ico", base_url=BASE)
+    assert r.status_code == 200 and len(r.data) > 100

@@ -58,4 +58,5 @@ body:
       label: Anything else
       description: >
         The graphics card (the app names it under "Add photos…"), a screenshot, and any message in the black window
-        the app runs in. Names typed into the app can show in screenshots: blank them if they are real children's.
+        the app runs in. Names typed into the app can show in screenshots and in the black window: blank them if
+        they are real children's.

@@ -4,6 +4,7 @@ from __future__ import annotations
 import html
 import io
 import json
+import logging
 import math
 import re
 import shutil
@@ -25,7 +26,7 @@ from PIL import Image
 import engine
 import model3d
 
-__version__ = "0.5.1"
+__version__ = "0.5.2"
 ROOT = Path(__file__).resolve().parent
 
 
@@ -39,8 +40,10 @@ ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 
 app = Flask(__name__, static_folder=str(ROOT / "static"), static_url_path="/static")
 app.config["MAX_CONTENT_LENGTH"] = 80 * 1024 * 1024
-RESULTS_KEPT = 6  # full outlines (with their bitmap) kept in memory, for exports
+RESULTS_KEPT = 6  # full outlines (with their bitmap) kept in memory, for the PNG
+SMALLEST = 200  # pixels on the short side: under this there is nothing to cut out
 _cache: OrderedDict[str, tuple] = OrderedDict()  # id -> (key, outline result)
+_curves: dict[str, tuple] = {}  # id -> (key, the result without its bitmap): small, so kept for every photo
 _outlines: dict[str, tuple] = {}  # id -> (key, what the page needs of the outline)
 _cache_lock = threading.Lock()
 CSP = ("default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; "
@@ -132,16 +135,22 @@ def _key(d: Path, meta: dict) -> list:
     return [(d / "mask.png").stat().st_mtime_ns, json.dumps(meta["settings"], sort_keys=True), engine.REV]
 
 
-def _result(d: Path, meta: dict) -> dict:
-    """Full outline for the item's current mask + settings (a few are kept in memory)."""
+def _result(d: Path, meta: dict, bitmap: bool = False) -> dict:
+    """The outline for the item's current mask + settings. The curves are kept
+    for every photo, so a whole class is traced once, not at every download;
+    the bitmap (only the PNG needs it) is kept for a few."""
     key = _key(d, meta)
     with _cache_lock:
         hit = _cache.get(d.name)
         if hit and hit[0] == key:
             _cache.move_to_end(d.name)
             return hit[1]
+        light = _curves.get(d.name)
+        if not bitmap and light and light[0] == key:
+            return light[1]
     res = engine.outline(_mask(d), meta["settings"])
     with _cache_lock:
+        _curves[d.name] = (key, {"loops": res["loops"], "bbox": res["bbox"]})
         _cache[d.name] = (key, res)
         _cache.move_to_end(d.name)
         while len(_cache) > RESULTS_KEPT:
@@ -303,6 +312,11 @@ def index():
     return send_from_directory(ROOT / "static", "index.html")
 
 
+@app.get("/favicon.ico")  # browsers ask for it on the pages that name no icon
+def favicon():
+    return send_from_directory(ROOT / "static", "icon.ico")
+
+
 @app.get("/api/items")
 def list_items():
     return jsonify([_public(d, meta) for d, meta in _items()])
@@ -317,6 +331,9 @@ def add_item():
         img = engine.load_photo(f.stream)
     except Exception:
         return jsonify({"error": "That file could not be opened as a photo."}), 400
+    if min(img.size) < SMALLEST:
+        return jsonify({"error": f"That picture is too small to cut out ({img.width} × {img.height} pixels). "
+                                 "Check that it is the photo itself, not a thumbnail of it."}), 400
     quality = request.form.get("quality", "best")
     try:
         mask, note = _cut_out(img, quality)
@@ -477,6 +494,7 @@ def delete_item(item_id):
     d = _dir(item_id)
     shutil.rmtree(d)
     _cache.pop(item_id, None)
+    _curves.pop(item_id, None)
     _outlines.pop(item_id, None)
     return jsonify({"ok": True})
 
@@ -485,7 +503,7 @@ def delete_item(item_id):
 def export_item(item_id, ext):
     d = _dir(item_id)
     meta = _meta(d)
-    res = _result(d, meta)
+    res = _result(d, meta, bitmap=ext == "png")
     if not res["loops"]:
         abort(409)
     name = _safe_name(meta["name"])
@@ -793,5 +811,8 @@ if __name__ == "__main__":
         threading.Timer(1.0, lambda: webbrowser.open(f"http://127.0.0.1:{PORT}/")).start()
     threading.Thread(target=engine.hardware, daemon=True).start()  # and at the graphics card
     threading.Thread(target=engine.fonts, daemon=True).start()  # look through the fonts while the page opens
+    # No line per request in this window: the addresses carry the children's names.
+    # Warnings and errors still show.
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
     print(f"Silhouette Maker is running at http://127.0.0.1:{PORT}/  (close this window to stop)")
     app.run(host="127.0.0.1", port=PORT, threaded=True)

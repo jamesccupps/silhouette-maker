@@ -31,12 +31,70 @@ async function api(method, url, body) {
   else if (body) { opt.body = JSON.stringify(body); opt.headers = { "Content-Type": "application/json" }; }
   let r;
   try { r = await fetch(url, opt); }
-  catch { throw new Error("Silhouette Maker is not running. Start it again, then reload this page."); }
+  catch { throw Object.assign(new Error("Silhouette Maker is not running. Start it again, then try once more."), { offline: true }); }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || `Something went wrong (${r.status}).`);
   return data;
 }
 function enqueue(fn) { queue = queue.then(fn).catch((e) => busy(e.message, 6000)); return queue; }
+
+/* ---------- saves that did not reach the app ----------
+   When the app's window is closed, a change stays on this page only. It is kept
+   here and sent again every few seconds; the banner stays up until it is saved. */
+const unsaved = new Map(); // id -> { it, blob: the shape or null, settings: true when the name/settings wait }
+let retryTimer = 0, retrying = false;
+function showUnsaved() {
+  const on = unsaved.size > 0;
+  $("unsaved").hidden = !on;
+  $("savedNote").textContent = on ? "Not saved" : "Saves as you work";
+  $("savedNote").classList.toggle("bad", on);
+  if (on && !retryTimer) retryTimer = setInterval(() => { if (!retrying) { retrying = true; enqueue(retrySaves); } }, 3000);
+  if (!on) { clearInterval(retryTimer); retryTimer = 0; }
+}
+async function save(it, blob) { // with a blob: the shape; without: the name and settings. null = the app is not running
+  try {
+    const r = blob ? await api("PUT", `/api/items/${it.id}/mask`, blob)
+      : await api("PATCH", `/api/items/${it.id}`, { name: it.name, done: it.done, settings: it.settings });
+    const u = unsaved.get(it.id);
+    if (u) {
+      if (blob) u.blob = null; else u.settings = false;
+      if (!u.blob && !u.settings) unsaved.delete(it.id);
+      showUnsaved();
+    }
+    return r;
+  } catch (e) {
+    if (!e.offline) throw e;
+    const u = unsaved.get(it.id) || { it, blob: null, settings: false };
+    if (blob) u.blob = blob; else u.settings = true;
+    unsaved.set(it.id, u);
+    showUnsaved();
+    return null;
+  }
+}
+async function retrySaves() {
+  try {
+    for (const [id, u] of [...unsaved]) {
+      const it = u.it;
+      if (u.blob) { // the open photo's newest shape, if it moved on since
+        const o = await save(it, it === cur && hi >= 0 ? hist[hi].blob : u.blob);
+        if (!o) return;
+        it.outline = o;
+      }
+      if (unsaved.get(id)?.settings) {
+        const r = await save(it);
+        if (!r) return;
+        it.outline = r.outline;
+      }
+    }
+    busy("Saved.", 3000);
+    if (cur) showOutline(); else renderList();
+  } catch (e) { // the app answered, but not with a save (the photo was deleted, say): nothing left to send
+    unsaved.clear();
+    showUnsaved();
+    throw e;
+  } finally { retrying = false; }
+}
+addEventListener("beforeunload", (e) => { if (unsaved.size) { e.preventDefault(); e.returnValue = ""; } });
 
 let busyTimer = 0;
 function busy(text, ms) {
@@ -56,7 +114,7 @@ function thumb(it) {
   const w = b[2] - b[0], h = b[3] - b[1], p = Math.max(w, h) * 0.08, m = Math.max(w, h) + 2 * p;
   return `<svg viewBox="${b[0] - (m - w) / 2} ${b[1] - (m - h) / 2} ${m} ${m}"><path fill-rule="evenodd" transform="${flipT(it)}" d="${it.outline.d}"/></svg>`;
 }
-function kidHtml(it) { return `<div class="kid${it === cur ? " sel" : ""}" data-id="${it.id}">${thumb(it)}<span>${esc(label(it))}</span></div>`; }
+function kidHtml(it) { return `<div class="kid${it === cur ? " sel" : ""}" data-id="${it.id}" tabindex="0" role="button" aria-label="Open ${esc(label(it))}">${thumb(it)}<span>${esc(label(it))}</span></div>`; }
 function refreshItem(it) { // one child changed: redraw only its entry
   const el = $("list").querySelector(`[data-id="${it.id}"]`);
   if (el) el.outerHTML = kidHtml(it); else renderList();
@@ -84,7 +142,7 @@ function renderGallery() {
   for (const id of [...picked]) if (!items.some((it) => it.id === id)) picked.delete(id);
   const list = shown(), n = picked.size, photos = prefs.gView === "photo";
   $("grid").innerHTML = list.map((it) =>
-    `<div class="card${picked.has(it.id) ? " picked" : ""}" data-id="${it.id}" title="Open ${esc(label(it))}">` +
+    `<div class="card${picked.has(it.id) ? " picked" : ""}" data-id="${it.id}" tabindex="0" role="button" aria-label="Open ${esc(label(it))}" title="Open ${esc(label(it))}">` +
     `<div class="art">${photos && it.photo ? `<img loading="lazy" alt="" src="/api/items/${it.id}/thumb?v=${it.rev}">` : thumb(it)}</div>` +
     `<input type="checkbox" class="pick" title="Select"${picked.has(it.id) ? " checked" : ""}>` +
     `<div class="cap"><b>${esc(label(it))}</b><small>${it.outline.bbox ? `${it.outline.height_in.toFixed(2)} in tall` : "nothing to cut yet"}` +
@@ -181,6 +239,11 @@ $("restoreFile").onchange = (e) => {
 $("list").addEventListener("click", (e) => {
   const el = e.target.closest(".kid");
   if (el) select(items.find((it) => it.id === el.dataset.id));
+});
+for (const id of ["list", "grid"]) $(id).addEventListener("keydown", (e) => { // Enter or Space opens the child that has the focus
+  if ((e.key !== "Enter" && e.key !== " ") || !e.target.matches(".kid, .card")) return;
+  e.preventDefault(); e.stopPropagation();
+  select(items.find((it) => it.id === e.target.dataset.id));
 });
 
 /* ---------- loading an item ---------- */
@@ -314,8 +377,8 @@ function flushSettings() { // send the waiting change now
   if (!it) return;
   patchWaiting = null;
   enqueue(async () => {
-    const r = await api("PATCH", `/api/items/${it.id}`, { name: it.name, done: it.done, settings: it.settings });
-    it.outline = r.outline;
+    const r = await save(it);
+    if (r) it.outline = r.outline;
     if (it === cur) showOutline(); else renderList();
   });
 }
@@ -677,7 +740,8 @@ function commitMask(label) { // a brush stroke: remember it and save it
     if (it !== cur) return; // the shared mask canvas now holds another photo
     const blob = await maskBlob();
     pushHist(label, blob, JSON.stringify(it.settings));
-    it.outline = await api("PUT", `/api/items/${it.id}/mask`, blob);
+    const o = await save(it, blob);
+    if (o) it.outline = o;
     if (it === cur) showOutline(); else renderList();
   });
 }
@@ -690,10 +754,11 @@ function goTo(i, relative = false) { // relative: i steps from wherever we are w
     hi = i;
     if (maskChanged) {
       putMask(await createImageBitmap(st.blob), it);
-      await api("PUT", `/api/items/${it.id}/mask`, st.blob);
+      await save(it, st.blob);
     }
     it.settings = JSON.parse(st.settings);
-    it.outline = (await api("PATCH", `/api/items/${it.id}`, { settings: it.settings })).outline;
+    const r = await save(it);
+    if (r) it.outline = r.outline;
     if (it === cur) { fillPanel(); showOutline(); renderHist(); } else renderList();
   });
 }
