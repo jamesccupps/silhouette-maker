@@ -136,7 +136,7 @@ input[type=color]{width:100%;height:32px;padding:2px;background:var(--bg);border
   <div id="backupNote" data-tip="When Back up was last pressed. A backup is the only copy of your brush work outside this folder." hidden></div>
   <footer>
     <button id="backupBtn" data-tip="Save everything (photos, silhouettes, settings) as one zip file. It contains the photos, so keep it somewhere private.">Back up</button>
-    <button id="restoreBtn" data-tip="Add the children from a backup file. Ones already here are left alone.">Restore</button>
+    <button id="restoreBtn" data-tip="Add the people from a backup file. Ones already here are left alone.">Restore</button>
     <button id="helpBtn" data-tip="How to use the app, step by step, and the keyboard shortcuts.">Help</button>
     <input type="file" id="restoreFile" accept=".zip" hidden>
   </footer>
@@ -176,7 +176,7 @@ input[type=color]{width:100%;height:32px;padding:2px;background:var(--bg);border
         <h2>Drop side-on photos here</h2>
         <div>or use <b>Add photos…</b> — each one is cut out automatically.</div>
         <ul>
-          <li>Child looking straight sideways, camera level with their head.</li>
+          <li>The person looking straight sideways, camera level with their head.</li>
           <li>Plain, bright wall behind them; a little space around the head.</li>
           <li>Hair off the face so the forehead, nose, lips and chin show.</li>
           <li>Include the neck and shoulders, so there is room for the neckline.</li>
@@ -190,7 +190,7 @@ input[type=color]{width:100%;height:32px;padding:2px;background:var(--bg);border
     </div>
     <div id="gallery" hidden>
       <div id="gbar">
-        <input type="text" id="q" placeholder="Search names…" data-tip="Show only the children whose name contains what you type.">
+        <input type="text" id="q" placeholder="Search names…" data-tip="Show only the people whose name contains what you type.">
         <select id="filter" data-tip="Show everyone, only those still to finish, or only the finished ones."><option value="all">All</option><option value="todo">To finish</option><option value="done">Finished</option></select>
         <select id="sort" data-tip="Order of the cards."><option value="added">Newest first</option><option value="name">By name</option></select>
         <button id="gView" data-tip="Switch the cards between the silhouettes and the original photos."></button>
@@ -198,18 +198,18 @@ input[type=color]{width:100%;height:32px;padding:2px;background:var(--bg);border
         <span class="grow"></span>
         <button id="gAll" data-tip="Tick every card shown, or untick them all. With cards ticked, the buttons to the right act on just those."></button>
         <button id="gProof" data-tip="A print preview of everyone at real size, on their ornaments or alone, with names. Print it on plain paper to check likeness and fit before cutting, or to cut out by hand.">Print…</button>
-        <button id="g3d" data-tip="3D-print files for everyone in one zip: each child's whole ornament and their silhouette alone, as STL, using the sizes under 3D printing.">3D files</button>
-        <button id="gZip" data-tip="One SVG file per child, in a zip, ready to upload to Cricut Design Space."></button>
+        <button id="g3d" data-tip="3D-print files for everyone in one zip: each person's whole ornament and their silhouette alone, as STL, using the sizes under 3D printing.">3D files</button>
+        <button id="gZip" data-tip="One SVG file per person, in a zip, ready to upload to Cricut Design Space."></button>
         <select id="mat" data-tip="The cutting area the sheet is laid out for. Design Space may shrink a file taller than 11.5 in, so check its size after uploading a 12 × 24 sheet.">
           <option value="11.5x11.5">12 × 12 mat</option>
           <option value="11.5x23.5">12 × 24 mat</option>
           <option value="4.25x11.75">Joy 4.5 × 12 mat</option>
           <option value="8x10.5">Letter page</option>
         </select>
-        <button id="gSheet" data-tip="The children packed together onto sheets of the size chosen on the left, to save material."></button>
-        <button id="gDone" data-tip="Mark the ticked children finished, or not finished."></button>
-        <button id="gForget" class="danger" data-tip="For privacy once you are done: delete the original photos of the ticked children and keep their silhouettes."></button>
-        <button id="gDel" class="danger" data-tip="Delete the ticked children completely: photo and silhouette."></button>
+        <button id="gSheet" data-tip="Everyone packed together onto sheets of the size chosen on the left, to save material."></button>
+        <button id="gDone" data-tip="Mark the ticked people finished, or not finished."></button>
+        <button id="gForget" class="danger" data-tip="For privacy once you are done: delete the original photos of the ticked people and keep their silhouettes."></button>
+        <button id="gDel" class="danger" data-tip="Delete the ticked people completely: photo and silhouette."></button>
       </div>
       <div id="grid"></div>
     </div>
@@ -221,10 +221,10 @@ input[type=color]{width:100%;height:32px;padding:2px;background:var(--bg);border
 <aside id="right">
   <div id="panel" hidden class="stack" style="gap:8px">
     <details class="sec" open>
-      <summary>Child</summary>
+      <summary>Person</summary>
       <div class="in">
-        <label class="field" data-tip="The child's name. It names the files, and it is the name lettered on the ornament if you switch that on below."><span>Name</span><input type="text" id="name" maxlength="60" placeholder="Type the child's name"></label>
-        <label class="check" data-tip="Tick when this child is done. The gallery can then show only the ones still to finish."><input type="checkbox" id="done"> Finished</label>
+        <label class="field" data-tip="The person's name. It names the files, and it is the name lettered on the ornament if you switch that on below."><span>Name</span><input type="text" id="name" maxlength="60" placeholder="Type the child's name"></label>
+        <label class="check" data-tip="Tick when this person is done. The gallery can then show only the ones still to finish."><input type="checkbox" id="done"> Finished</label>
       </div>
     </details>
 
@@ -235,7 +235,7 @@ input[type=color]{width:100%;height:32px;padding:2px;background:var(--bg);border
         <div id="size"></div>
         <div class="row">
           <label class="field" style="flex:1" data-tip="How tall the cut silhouette is, in inches, from the top of the head to the neckline."><span>Silhouette height (in)</span><input type="number" id="height" min="0.25" max="24" step="0.05"></label>
-          <button id="sizeAll" style="flex:1.2;align-self:flex-end;white-space:nowrap" data-tip="Give every child this silhouette height, so all the ornaments match. Photos added later get it too.">Same for everyone</button>
+          <button id="sizeAll" style="flex:1.2;align-self:flex-end;white-space:nowrap" data-tip="Give everyone this silhouette height, so all the ornaments match. Photos added later get it too.">Same for everyone</button>
         </div>
         <div class="row">
           <label class="field" style="flex:1.3" data-tip="The shape of the ornament the silhouette goes on."><span>Ornament shape</span><select id="ornShape">
@@ -254,7 +254,7 @@ input[type=color]{width:100%;height:32px;padding:2px;background:var(--bg);border
     <details class="sec" open>
       <summary>Shape</summary>
       <div class="in">
-        <label class="check" data-tip="Mirror the silhouette so the child faces the other direction."><input type="checkbox" id="flip"> Face the other way</label>
+        <label class="check" data-tip="Mirror the silhouette so the person faces the other direction."><input type="checkbox" id="flip"> Face the other way</label>
         <label class="check" data-tip="Cut the bust off along the dashed neckline. Use the Neckline tool above the photo to move it. Untick to keep everything in the photo."><input type="checkbox" id="cutOn"> Cut off at the neckline</label>
         <label class="field" data-tip="Tilt the picture until the head sits level. Switch on Grid above the photo to judge it. Double-click the slider to go back to 0."><span>Straighten <b id="tiltV"></b></span><input type="range" id="tilt" min="-45" max="45" step="0.5"></label>
         <label class="field" data-tip="How much the outline is rounded. Higher is smoother and easier to cut; lower keeps more of the fine detail in hair and lashes. Double-click the slider to go back to 3."><span>Smoothing <b id="smoothV"></b></span><input type="range" id="smooth" min="0" max="10" step="0.5"></label>
@@ -266,7 +266,7 @@ input[type=color]{width:100%;height:32px;padding:2px;background:var(--bg);border
     <details class="sec" open id="letterSec">
       <summary>Lettering</summary>
       <div class="in">
-        <label class="check" data-tip="Letter the child's name (from the Name box at the top) on the ornament."><input type="checkbox" id="nameOn"> Put the name on it</label>
+        <label class="check" data-tip="Letter the person's name (from the Name box at the top) on the ornament."><input type="checkbox" id="nameOn"> Put the name on it</label>
         <div class="row">
           <label class="field" style="flex:2" data-tip="The font for the name. Every font installed on this computer is listed; the suggested ones cut well. Install a new font in Windows, restart the app, and it appears here."><span>Name font</span><select id="font"></select></label>
           <label class="field" style="flex:1" data-tip="How big the name's letters are, in inches. It shrinks by itself if the name would not fit."><span>Size (in)</span><input type="number" id="tsize" min="0.08" max="2" step="0.02"></label>
@@ -288,9 +288,9 @@ input[type=color]{width:100%;height:32px;padding:2px;background:var(--bg);border
           <label class="field" style="flex:1.4" data-tip="What the files have behind the silhouette: nothing, a plain box, or the ornament's own shape. It arrives in Design Space as its own layer: a size guide you can delete, or a backing you can cut."><span>Behind the silhouette</span><select id="border"><option value="none">Nothing</option><option value="rect">A box</option><option value="ornament">The ornament shape</option></select></label>
           <label class="field" style="flex:1" data-tip="Blank margin around the silhouette, in inches (for Nothing or A box)."><span>Margin (in)</span><input type="number" id="space" min="0" max="6" step="0.05"></label>
         </div>
-        <button class="primary" id="svgBtn" data-tip="The cut file for this child. In Cricut Design Space: Upload, choose the file, add it to the canvas.">Download SVG for Cricut</button>
+        <button class="primary" id="svgBtn" data-tip="The cut file for this person. In Cricut Design Space: Upload, choose the file, add it to the canvas.">Download SVG for Cricut</button>
         <button id="pngBtn" data-tip="A picture of the silhouette on a clear background, for printing or sharing. No lettering.">Download PNG</button>
-        <button id="printBtn" data-tip="Opens a print preview of this child at real size: on the ornament or the silhouette alone, solid or as an outline. Print it at 100% and it comes out the size set here. You can also save it as a PDF from there.">Print…</button>
+        <button id="printBtn" data-tip="Opens a print preview of this person at real size: on the ornament or the silhouette alone, solid or as an outline. Print it at 100% and it comes out the size set here. You can also save it as a PDF from there.">Print…</button>
       </div>
     </details>
 
@@ -324,7 +324,7 @@ input[type=color]{width:100%;height:32px;padding:2px;background:var(--bg);border
           <button id="redo" data-tip="Run the automatic cut-out again with the model chosen here, if the first try missed. It replaces your brush edits.">Cut out again</button>
         </div>
         <button id="forget" data-tip="For privacy once you are done: the original photo is deleted, the silhouette stays. It cannot be cut out again afterwards.">Delete the photo, keep the silhouette</button>
-        <button class="danger" id="del" data-tip="Delete this child completely: photo and silhouette.">Delete photo and silhouette</button>
+        <button class="danger" id="del" data-tip="Delete this person completely: photo and silhouette.">Delete photo and silhouette</button>
       </div>
     </details>
   </div>
@@ -337,7 +337,7 @@ input[type=color]{width:100%;height:32px;padding:2px;background:var(--bg);border
     <h3>The steps</h3>
     <ol>
       <li><b>Add photos.</b> Side-on, plain bright wall, hair off the face, neck and shoulders in the picture. Each one is cut out automatically and appears in the gallery.</li>
-      <li><b>Open a child</b> by clicking their card. Type their <b>name</b> at the top right.</li>
+      <li><b>Open a person</b> by clicking their card. Type their <b>name</b> at the top right.</li>
       <li><b>Fix the shape</b> if needed. The orange line is what will be cut. Use <b>Add</b> and <b>Erase</b> to paint parts in or out, <b>Neckline</b> to move the bottom cut, <b>Turn</b> and <b>Straighten</b> if the photo is crooked.</li>
       <li><b>Choose the ornament</b>: its shape and size, and how tall the silhouette is. The picture at the top right shows exactly how it will sit.</li>
       <li><b>Lettering</b> (optional): the name and a second line, straight or curved.</li>

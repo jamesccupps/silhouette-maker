@@ -674,7 +674,7 @@ def print_page():
            f'<label>Names {pick("names", "1" if names else "0", [("1", "Under each"), ("0", "None")])}</label>'
            f'<label>Copies of each <input type="number" name="copies" min="1" max="20" value="{copies}"></label>'
            f'<button type="button" id="print">Print\u2026</button>'
-           f'<span class="count">{n} {"child" if n == 1 else "children"} \u00b7 {len(pages)} page{"" if len(pages) == 1 else "s"}'
+           f'<span class="count">{n} {"person" if n == 1 else "people"} \u00b7 {len(pages)} page{"" if len(pages) == 1 else "s"}'
            f'{fit}</span>'
            f'<p class="how">Below is each page as it will print. In the print window set <b>Scale</b> to <b>100%</b> '
            f'(or \u201cActual size\u201d), not \u201cFit to page\u201d; then everything comes out the size you set. To check, '

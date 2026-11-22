@@ -21,7 +21,7 @@ ornament.
 | --- | --- |
 | ![The print preview: each page as it will print, with a 2 inch bar to check the scale](docs/print.png) | ![The 3D printing section: a picture of the model, thickness, hanging hole and the STL downloads](docs/3d-printing.png) |
 
-*The pictures use the drawn sample profiles in `samples/`, not real children.*
+*The pictures use the drawn sample portraits in `samples/`, not real people.*
 
 ## Photos never leave the computer
 

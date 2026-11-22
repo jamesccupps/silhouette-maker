@@ -212,7 +212,7 @@ $("g3d").onclick = () => {
 };
 $("gForget").onclick = () => {
   const list = targets().filter((it) => it.photo);
-  if (!confirm(`Delete the original photo${list.length > 1 ? "s" : ""} of ${list.length} ${list.length > 1 ? "children" : "child"} and keep the silhouette${list.length > 1 ? "s" : ""}? They cannot be cut out again afterwards.`)) return;
+  if (!confirm(`Delete the original photo${list.length > 1 ? "s" : ""} of ${list.length} ${list.length > 1 ? "people" : "person"} and keep the silhouette${list.length > 1 ? "s" : ""}? They cannot be cut out again afterwards.`)) return;
   enqueue(async () => {
     for (const it of list) Object.assign(it, await api("POST", `/api/items/${it.id}/forget`), { name: it.name });
     renderList();
