@@ -257,8 +257,9 @@ input[type=color]{width:100%;height:32px;padding:2px;background:var(--bg);border
         <label class="check" data-tip="Mirror the silhouette so the child faces the other direction."><input type="checkbox" id="flip"> Face the other way</label>
         <label class="check" data-tip="Cut the bust off along the dashed neckline. Use the Neckline tool above the photo to move it. Untick to keep everything in the photo."><input type="checkbox" id="cutOn"> Cut off at the neckline</label>
         <label class="field" data-tip="Tilt the picture until the head sits level. Switch on Grid above the photo to judge it. Double-click the slider to go back to 0."><span>Straighten <b id="tiltV"></b></span><input type="range" id="tilt" min="-45" max="45" step="0.5"></label>
-        <label class="field" data-tip="How much the outline is rounded. Higher is smoother and easier to cut; lower keeps more of the fine detail in hair and lashes."><span>Smoothing <b id="smoothV"></b></span><input type="range" id="smooth" min="0" max="10" step="0.5"></label>
-        <label class="field" data-tip="Anything thinner than this at the finished size (wisps of hair) is dropped, because it would tear when you weed the vinyl."><span>Thinnest detail kept <b id="detailV"></b></span><input type="range" id="detail" min="0" max="1.5" step="0.1"></label>
+        <label class="field" data-tip="How much the outline is rounded. Higher is smoother and easier to cut; lower keeps more of the fine detail in hair and lashes. Double-click the slider to go back to 3."><span>Smoothing <b id="smoothV"></b></span><input type="range" id="smooth" min="0" max="10" step="0.5"></label>
+        <label class="field" data-tip="Anything thinner than this at the finished size (wisps of hair) is dropped, because it would tear when you weed the vinyl. Double-click the slider to go back to 0.5 mm."><span>Thinnest detail kept <b id="detailV"></b></span><input type="range" id="detail" min="0" max="1.5" step="0.1"></label>
+        <button id="shapeReset" data-tip="Put everything in this section back to how a new photo starts: facing, the neckline, straighten, smoothing and thinnest detail. Your brush work and the size are kept. Undo takes it back.">Reset shape settings</button>
       </div>
     </details>
 

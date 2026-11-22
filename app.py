@@ -26,7 +26,7 @@ from PIL import Image
 import engine
 import model3d
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 ROOT = Path(__file__).resolve().parent
 
 
@@ -434,6 +434,18 @@ def reset_item(item_id):
                             height_in=meta["settings"].get("height_in", engine.DEFAULT_SETTINGS["height_in"]))
     _save_meta(d, meta)
     return jsonify(dict(_public(d, meta), note=note))
+
+
+@app.post("/api/items/<item_id>/reset-shape")
+def reset_shape(item_id):
+    """The Shape settings back to how a new photo starts (facing, neckline,
+    straighten, smoothing, thinnest detail). The painted shape and the size are kept."""
+    d = _dir(item_id)
+    meta = _meta(d)
+    meta["settings"] = dict(engine.DEFAULT_SETTINGS, cut=engine.default_cut(_mask(d)),
+                            height_in=meta["settings"].get("height_in", engine.DEFAULT_SETTINGS["height_in"]))
+    _save_meta(d, meta)
+    return jsonify(_public(d, meta))
 
 
 @app.post("/api/items/<item_id>/rotate")

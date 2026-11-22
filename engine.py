@@ -28,7 +28,7 @@ try:  # iPhone photos (HEIC); optional
 except Exception:  # pragma: no cover - the app works without it
     pass
 
-REV = 2  # raise when outline() changes its result, so saved outlines are redone
+REV = 3  # raise when outline() changes its result, so saved outlines are redone
 WORK_MAX = 2000  # longest side of the working photo, px
 # A loaded model is let go after this long unused. The best one holds about
 # 10 GB of graphics memory while loaded; loading it again costs about 10 s.
@@ -325,8 +325,11 @@ def outline(mask: np.ndarray, settings: dict) -> dict:
         binary = _largest(binary)
 
     # Smooth by blurring the mask and tracing its half level (sub-pixel).
-    pad = 8
     sigma = max(0.8, float(s["smooth"]) * 0.0012 * bh)
+    # Room around the picture for the blur to fade out. With too little, a shape that
+    # reaches the edge of the photo (neckline off) gave a line that ran off the picture
+    # and was dropped: "nothing to cut" at high smoothing.
+    pad = max(8, int(3 * sigma) + 2)
     soft = cv2.copyMakeBorder(binary, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=0)
     soft = cv2.GaussianBlur(soft.astype(np.float32) / 255.0, (0, 0), sigma)
     final = np.where(soft[pad:-pad, pad:-pad] > 0.5, 255, 0).astype(np.uint8)

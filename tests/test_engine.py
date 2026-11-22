@@ -344,3 +344,14 @@ def test_print_pages_count_what_is_on_each_page():
     counts = []
     pages = engine.print_pages([("A", r, s)] * 15, {"orn": 3.0}, "letter", counts=counts)
     assert len(counts) == len(pages) > 1 and sum(counts) == 15 and counts[0] >= counts[-1]
+
+
+@pytest.mark.parametrize("smooth", [3, 6, 9, 10])
+def test_a_shape_that_reaches_the_edge_of_the_photo_is_still_traced_when_smoothed(smooth):
+    mask = bust()                                    # the shoulders run off the bottom of the picture
+    s = dict(settings(mask), cut_on=False, smooth=smooth)
+    plain = engine.outline(mask, dict(s, smooth=0))
+    r = engine.outline(mask, s)
+    assert r["loops"], "nothing to cut"
+    (x0, y0, x1, y1), (a0, b0, a1, b1) = r["bbox"], plain["bbox"]
+    assert abs((x1 - x0) - (a1 - a0)) < 0.1 * (a1 - a0) and abs((y1 - y0) - (b1 - b0)) < 0.1 * (b1 - b0)

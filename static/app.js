@@ -431,6 +431,19 @@ bind("detail", "change", () => record("Thinnest detail"));
 bind("tilt", "input", (t) => { cur.settings.tilt_deg = +t.value; labels(); draw(); pushSettings(); });
 bind("tilt", "dblclick", (t) => { t.value = 0; cur.settings.tilt_deg = 0; labels(); draw(); pushSettings(0); record("Straighten"); });
 bind("smooth", "input", (t) => { cur.settings.smooth = +t.value; labels(); pushSettings(); });
+bind("smooth", "dblclick", (t) => { t.value = 3; cur.settings.smooth = 3; labels(); pushSettings(0); record("Smoothing"); }); // 3 and 0.5: what a new photo starts with
+bind("detail", "dblclick", (t) => { t.value = 0.5; cur.settings.detail_mm = 0.5; labels(); pushSettings(0); record("Thinnest detail"); });
+$("shapeReset").onclick = () => { // the Shape section only: the painted shape stays
+  const it = cur;
+  flushSettings();
+  enqueue(async () => {
+    const r = await api("POST", `/api/items/${it.id}/reset-shape`);
+    it.settings = r.settings; it.outline = r.outline;
+    if (it !== cur) return renderList();
+    fillPanel(); showOutline(); draw();
+    if (hi >= 0) pushHist("Reset shape settings", hist[hi].blob, JSON.stringify(it.settings));
+  });
+};
 bind("detail", "input", (t) => { cur.settings.detail_mm = +t.value; labels(); pushSettings(); });
 function exportQuery() { // what goes around and under the silhouette, for every file and the preview
   const q = new URLSearchParams({ border: prefs.border, space: prefs.space, shape: prefs.ornShape, orn: prefs.ornD, orn_h: prefs.ornH });

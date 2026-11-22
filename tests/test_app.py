@@ -526,3 +526,24 @@ def test_print_page_says_how_many_fit_and_wraps_its_pages(client):
     assert 2 <= n < 15
     one = client.get(f"/print?orn=3&ids={ids[0]}", base_url=BASE).get_data(as_text=True)
     assert "fit on a page" not in one                       # one page: nothing to say
+
+
+def test_reset_shape_settings_keeps_the_painted_shape_and_the_size(client):
+    it = add(client)
+    url = f"/api/items/{it['id']}"
+    painted = io.BytesIO()
+    m = Image.open(server.DATA / it["id"] / "mask.png").convert("L")
+    m.paste(255, (0, 0, 80, 80))                                 # a brush stroke
+    m.save(painted, "PNG")
+    client.put(url + "/mask", base_url=BASE, data=painted.getvalue())
+    saved = (server.DATA / it["id"] / "mask.png").read_bytes()
+    client.patch(url, base_url=BASE, json={"name": "Kept", "settings": {
+        "height_in": 3, "tilt_deg": 12, "flip": True, "smooth": 9, "detail_mm": 1.2, "cut_on": False}})
+
+    r = client.post(url + "/reset-shape", base_url=BASE).get_json()
+    s, d = r["settings"], engine.DEFAULT_SETTINGS
+    assert (s["tilt_deg"], s["flip"], s["smooth"], s["detail_mm"], s["cut_on"]) == \
+        (0.0, False, d["smooth"], d["detail_mm"], True)
+    assert s["height_in"] == 3 and r["name"] == "Kept" and len(s["cut"]) == 3
+    assert (server.DATA / it["id"] / "mask.png").read_bytes() == saved   # the brush work is still there
+    assert client.post("/api/items/000000000000/reset-shape", base_url=BASE).status_code == 404
