@@ -29,7 +29,7 @@ body:
     attributes:
       label: Silhouette Maker version
       description: The release you downloaded, or `__version__` near the top of app.py
-      placeholder: "0.5.1"
+      placeholder: "0.6.0"
     validations:
       required: true
   - type: dropdown

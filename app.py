@@ -26,7 +26,7 @@ from PIL import Image
 import engine
 import model3d
 
-__version__ = "0.5.2"
+__version__ = "0.6.0"
 ROOT = Path(__file__).resolve().parent
 
 
@@ -639,7 +639,8 @@ def print_page():
     ink = "outline" if a.get("ink") == "outline" else "solid"
     names = a.get("names", "1") != "0"
     copies = int(_num(a.get("copies"), 1, 20, 1))
-    pages = engine.print_pages(items, o, paper, show, ink, names, copies)
+    counts: list[int] = []
+    pages = engine.print_pages(items, o, paper, show, ink, names, copies, counts=counts)
     pw, ph, _ = engine.PAPERS[paper]
 
     def pick(key, value, choices):
@@ -653,6 +654,7 @@ def print_page():
     size = f"{ow:g} in" if ow == oh else f"{ow:g} \u00d7 {oh:g} in"
     orn = f" The dashed line is the {size} {engine.ORNAMENTS[o['shape']].lower()} ornament." if show == "ornament" else ""
     n = len(items)
+    fit = f" · {max(counts)} fit on a page" if len(pages) > 1 else ""
     bar = (f'<form class="bar" id="opts" method="get" action="/print">{kept}<h1>Print</h1>'
            f'<label>Paper {pick("paper", paper, [(k, v[2]) for k, v in engine.PAPERS.items()])}</label>'
            f'<label>Show {pick("show", show, [("ornament", "On the ornament"), ("shape", "Silhouette only")])}</label>'
@@ -660,12 +662,14 @@ def print_page():
            f'<label>Names {pick("names", "1" if names else "0", [("1", "Under each"), ("0", "None")])}</label>'
            f'<label>Copies of each <input type="number" name="copies" min="1" max="20" value="{copies}"></label>'
            f'<button type="button" id="print">Print\u2026</button>'
-           f'<span class="count">{n} {"child" if n == 1 else "children"} \u00b7 {len(pages)} page{"" if len(pages) == 1 else "s"}</span>'
+           f'<span class="count">{n} {"child" if n == 1 else "children"} \u00b7 {len(pages)} page{"" if len(pages) == 1 else "s"}'
+           f'{fit}</span>'
            f'<p class="how">Below is each page as it will print. In the print window set <b>Scale</b> to <b>100%</b> '
            f'(or \u201cActual size\u201d), not \u201cFit to page\u201d; then everything comes out the size you set. To check, '
            f'measure the black bar on the paper: it is exactly 2 inches.{orn} To save a PDF instead, choose '
            f'\u201cSave as PDF\u201d as the printer.</p></form>')
     sheets = "".join(f'<div class="sheet">{pg[pg.index("<svg"):]}</div>' for pg in pages)
+    sheets = f'<div id="sheets">{sheets}</div>'
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Print silhouettes</title>'
             f'<style>{PRINT_CSS}:root{{--pw:{pw}in;--ph:{ph}in}}@page{{size:{pw}in {ph}in;margin:0}}</style></head>'
             f'<body>{bar}{sheets}<script src="/static/print.js"></script></body></html>')
@@ -744,8 +748,30 @@ def backup():
                 if (d / f).exists():
                     z.write(d / f, f"{d.name}/{f}")
     buf.seek(0)
+    try:  # when the last backup was made, for the line above the button
+        (DATA / "backup.json").write_text(json.dumps({"at": time.time()}), encoding="utf-8")
+    except OSError:
+        pass
     return send_file(buf, mimetype="application/zip", as_attachment=True,
                      download_name=f"silhouette-maker-backup-{time.strftime('%Y-%m-%d')}.zip")
+
+
+@app.get("/api/backup/last")
+def last_backup():
+    """When Back up was last pressed, and whether anything changed since."""
+    try:
+        at = float(json.loads((DATA / "backup.json").read_text(encoding="utf-8"))["at"])
+    except (OSError, ValueError, KeyError, TypeError):
+        at = None
+    found = _items()
+    newest = 0.0
+    for d, _meta_ in found:
+        for f in ("meta.json", "mask.png"):
+            try:
+                newest = max(newest, (d / f).stat().st_mtime)
+            except OSError:
+                pass
+    return jsonify({"at": at, "photos": len(found), "changed": at is not None and newest > at})
 
 
 @app.post("/api/restore")
@@ -810,6 +836,7 @@ if __name__ == "__main__":
     if "--no-browser" not in sys.argv:
         threading.Timer(1.0, lambda: webbrowser.open(f"http://127.0.0.1:{PORT}/")).start()
     threading.Thread(target=engine.hardware, daemon=True).start()  # and at the graphics card
+    engine.FONT_CACHE = DATA / "fonts.json"  # the look-through is kept, until a font is added or removed
     threading.Thread(target=engine.fonts, daemon=True).start()  # look through the fonts while the page opens
     # No line per request in this window: the addresses carry the children's names.
     # Warnings and errors still show.

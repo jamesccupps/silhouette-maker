@@ -146,7 +146,7 @@ function renderGallery() {
     `<div class="art">${photos && it.photo ? `<img loading="lazy" alt="" src="/api/items/${it.id}/thumb?v=${it.rev}">` : thumb(it)}</div>` +
     `<input type="checkbox" class="pick" title="Select"${picked.has(it.id) ? " checked" : ""}>` +
     `<div class="cap"><b>${esc(label(it))}</b><small>${it.outline.bbox ? `${it.outline.height_in.toFixed(2)} in tall` : "nothing to cut yet"}` +
-    `${it.done ? ' · <span class="ok">Finished ✓</span>' : ""}</small></div></div>`).join("") ||
+    `${it.done ? ' · <span class="ok">Finished ✓</span>' : ""}${it.photo ? "" : ' · <span class="gone" title="The original photo was deleted. The silhouette is kept; it cannot be cut out again.">photo deleted</span>'}</small></div></div>`).join("") ||
     `<div class="none">No photos match.</div>`;
   $("gCount").textContent = list.length === items.length ? `${items.length} photo${items.length === 1 ? "" : "s"}` : `${list.length} of ${items.length}`;
   $("gView").textContent = photos ? "Show silhouettes" : "Show photos";
@@ -219,7 +219,19 @@ $("gForget").onclick = () => {
     busy(`${list.length} photo${list.length > 1 ? "s" : ""} deleted. The silhouettes are kept.`, 5000);
   });
 };
-$("backupBtn").onclick = () => download("/api/backup");
+$("backupBtn").onclick = () => { download("/api/backup"); setTimeout(showBackup, 1500); };
+function ago(t) {
+  const s = Date.now() / 1000 - t, n = (v, word) => `${Math.round(v)} ${word}${Math.round(v) === 1 ? "" : "s"} ago`;
+  return s < 90 ? "just now" : s < 3600 ? n(s / 60, "minute") : s < 129600 ? n(s / 3600, "hour") : n(s / 86400, "day");
+}
+async function showBackup() { // the line above Back up: when, and whether anything changed since
+  let r;
+  try { r = await api("GET", "/api/backup/last"); } catch { return; }
+  const el = $("backupNote");
+  el.hidden = !r.photos;
+  el.textContent = !r.at ? "Not backed up yet" : `Backed up ${ago(r.at)}` + (r.changed ? ", changed since" : "");
+  el.classList.toggle("warn", !r.at || r.changed);
+}
 $("restoreBtn").onclick = () => $("restoreFile").click();
 $("restoreFile").onchange = (e) => {
   const f = e.target.files[0];
@@ -263,7 +275,7 @@ function putMask(im, it) { // a black-and-white picture -> the editable shape
 async function select(it) {
   const token = ++loadToken;
   if (!it) {
-    cur = null; photo = null; renderList(); draw();
+    cur = null; photo = null; renderList(); draw(); showBackup();
     if (location.hash) history.pushState(null, "", location.pathname); // so Back reopens it
     return;
   }
@@ -938,6 +950,7 @@ setTool("add"); setMode("overlay");
 (async () => {
   try { items = await api("GET", "/api/items"); } catch (e) { busy(e.message); }
   loadHardware();
+  showBackup();
   loadFonts(); // not awaited: looking through the computer's fonts can take a few seconds
   renderList();
   fromHash();

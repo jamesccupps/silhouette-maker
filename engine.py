@@ -6,6 +6,8 @@ one-time download of the model file itself; photos are never sent anywhere.
 from __future__ import annotations
 
 import gc
+import hashlib
+import json
 import logging
 import os
 import subprocess
@@ -446,35 +448,68 @@ def _registry() -> dict:
         return _scan()
 
 
+FONT_CACHE: Path | None = None  # the app names a file here, so the look-through is kept between starts
+
+
+def _font_files() -> list[Path]:
+    return [f for d in _font_dirs() for f in sorted(d.rglob("*")) if f.suffix.lower() in (".ttf", ".otf", ".ttc")]
+
+
+def _font_signature(files: list[Path]) -> str:
+    """Changes when a font is added, removed or replaced."""
+    h = hashlib.sha256()
+    for f in files:
+        try:
+            st = f.stat()
+            h.update(f"{f}|{st.st_size}|{st.st_mtime_ns}\n".encode("utf-8", "replace"))
+        except OSError:
+            pass
+    return h.hexdigest()
+
+
 @lru_cache(maxsize=1)
 def _scan() -> dict:
     try:
         from fontTools.ttLib import TTCollection, TTFont
     except ImportError:
         return {}
+    files = _font_files()
+    sig = _font_signature(files)
+    if FONT_CACHE:
+        try:
+            got = json.loads(FONT_CACHE.read_text(encoding="utf-8"))
+            if got["v"] == 1 and got["sig"] == sig:
+                return {k: (Path(path), int(number), str(label)) for k, path, number, label in got["fonts"]}
+        except (OSError, ValueError, KeyError, TypeError):
+            pass  # no list yet, or not one of ours: look through the fonts
     out, seen = {}, set()
-    for d in _font_dirs():
-        for f in sorted(d.rglob("*")):
-            ext = f.suffix.lower()
-            if ext not in (".ttf", ".otf", ".ttc"):
-                continue
-            try:
-                count = len(TTCollection(str(f), lazy=True).fonts) if ext == ".ttc" else 1
-                for i in range(count):
-                    number = i if ext == ".ttc" else -1
-                    font = TTFont(str(f), fontNumber=number, lazy=True)
-                    cmap = font.getBestCmap() or {}
-                    if not all(ord(c) in cmap for c in "AaZz09"):
-                        continue  # a symbol font
-                    names = font["name"]
-                    family, style = names.getBestFamilyName(), names.getBestSubFamilyName()
-                    label = family if style in (None, "", "Regular", "Normal", "Roman", "Book") else f"{family} {style}"
-                    key = f.name.lower() + (f"#{i}" if ext == ".ttc" else "")
-                    if label and label not in seen and key not in out:
-                        seen.add(label)
-                        out[key] = (f, number, label)
-            except Exception:
-                continue  # a damaged or unusual font file: leave it out
+    for f in files:
+        ext = f.suffix.lower()
+        try:
+            count = len(TTCollection(str(f), lazy=True).fonts) if ext == ".ttc" else 1
+            for i in range(count):
+                number = i if ext == ".ttc" else -1
+                font = TTFont(str(f), fontNumber=number, lazy=True)
+                cmap = font.getBestCmap() or {}
+                if not all(ord(c) in cmap for c in "AaZz09"):
+                    continue  # a symbol font
+                names = font["name"]
+                family, style = names.getBestFamilyName(), names.getBestSubFamilyName()
+                label = family if style in (None, "", "Regular", "Normal", "Roman", "Book") else f"{family} {style}"
+                key = f.name.lower() + (f"#{i}" if ext == ".ttc" else "")
+                if label and label not in seen and key not in out:
+                    seen.add(label)
+                    out[key] = (f, number, label)
+        except Exception:
+            continue  # a damaged or unusual font file: leave it out
+    if FONT_CACHE and out:
+        try:
+            tmp = FONT_CACHE.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"v": 1, "sig": sig, "fonts": [[k, str(v[0]), v[1], v[2]] for k, v in out.items()]}),
+                           encoding="utf-8")
+            tmp.replace(FONT_CACHE)
+        except OSError:
+            pass  # the list is only a time-saver
     return out
 
 
@@ -914,8 +949,9 @@ PAPERS = {"letter": (8.5, 11.0, "Letter (8.5 \u00d7 11 in)"), "a4": (8.2677, 11.
 
 def print_pages(items: list[tuple[str, dict, dict]], opts=None, paper: str = "letter", show: str = "ornament",
                 ink: str = "solid", names: bool = True, copies: int = 1, margin: float = 0.5,
-                gap: float = 0.2) -> list[str]:
-    """Pages to print on paper at real size, one SVG per page.
+                gap: float = 0.2, counts: list | None = None) -> list[str]:
+    """Pages to print on paper at real size, one SVG per page. A list given as
+    counts gets how many pieces landed on each page.
 
     show: ornament (each child on a dashed outline of the ornament) | shape
         (just the silhouette and its lettering)
@@ -943,9 +979,11 @@ def print_pages(items: list[tuple[str, dict, dict]], opts=None, paper: str = "le
 
     head = 0.35  # the scale bar and its note
     top = margin + head
-    pages, body, x, y, row_h = [], [], margin, top, 0.0
+    pages, body, x, y, row_h, on_page = [], [], margin, top, 0.0, 0
 
     def close():
+        if counts is not None:
+            counts.append(on_page)
         bar = (f'<rect x="{margin * u:.2f}" y="{margin * u:.2f}" width="{2 * u:.2f}" height="{0.08 * u:.2f}" fill="#000000"/>'
                f'<text x="{(margin + 2.15) * u:.2f}" y="{(margin + 0.08) * u:.2f}" font-family="Segoe UI, Arial, sans-serif" '
                f'font-size="8" fill="#444444">This bar is exactly 2 inches (50.8 mm) long when the page is printed at 100%.</text>\n')
@@ -956,8 +994,9 @@ def print_pages(items: list[tuple[str, dict, dict]], opts=None, paper: str = "le
             x, y, row_h = margin, y + row_h + gap, 0.0
         if y > top and y + h + cap > ph - margin:
             close()
-            body, x, y, row_h = [], margin, top, 0.0
+            body, x, y, row_h, on_page = [], margin, top, 0.0, 0
         body.append(f'<g transform="translate({x * u:.2f} {y * u:.2f})">{inner}</g>\n')
+        on_page += 1
         if names:
             body.append(f'<text x="{(x + w / 2) * u:.2f}" y="{(y + h + 0.15) * u:.2f}" text-anchor="middle" '
                         f'font-family="Segoe UI, Arial, sans-serif" font-size="8" fill="#333333">{note}</text>\n')

@@ -312,3 +312,35 @@ def test_print_pages_pack_everyone_at_real_size():
     one = engine.print_pages(items[:1], {"orn": 3.0}, "a4", show="shape", ink="outline", names=False, copies=3)
     assert len(one) == 1 and one[0].count("<g transform") == 3 and "in tall" not in one[0]
     assert 'stroke-width="0.7"' in one[0] and "stroke-dasharray" not in one[0]
+
+
+@needs_font
+def test_the_font_list_is_kept_between_starts(tmp_path, monkeypatch):
+    import fontTools.ttLib
+
+    monkeypatch.setattr(engine, "FONT_CACHE", tmp_path / "fonts.json")
+    engine._scan.cache_clear()
+    try:
+        first = engine._registry()
+        assert (tmp_path / "fonts.json").exists()
+        engine._scan.cache_clear()                              # as after starting the app again
+
+        def no_look(*a, **k):
+            raise AssertionError("looked through the fonts again")
+        with monkeypatch.context() as m:
+            m.setattr(fontTools.ttLib, "TTFont", no_look)
+            m.setattr(fontTools.ttLib, "TTCollection", no_look)
+            assert engine._registry() == first                  # read from the kept list
+        engine._scan.cache_clear()
+        monkeypatch.setattr(engine, "_font_signature", lambda files: "a font was added")
+        assert engine._registry() == first                      # looked through again, same fonts
+        assert "a font was added" in (tmp_path / "fonts.json").read_text(encoding="utf-8")
+    finally:
+        engine._scan.cache_clear()
+
+
+def test_print_pages_count_what_is_on_each_page():
+    r, s = engine.outline(bust(), engine.DEFAULT_SETTINGS), dict(engine.DEFAULT_SETTINGS, height_in=2.0)
+    counts = []
+    pages = engine.print_pages([("A", r, s)] * 15, {"orn": 3.0}, "letter", counts=counts)
+    assert len(counts) == len(pages) > 1 and sum(counts) == 15 and counts[0] >= counts[-1]

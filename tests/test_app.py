@@ -501,3 +501,28 @@ def test_a_class_is_traced_once_not_at_every_download(client, monkeypatch):
 def test_the_tab_icon_is_served(client):
     r = client.get("/favicon.ico", base_url=BASE)
     assert r.status_code == 200 and len(r.data) > 100
+
+
+def test_last_backup_says_when_and_whether_anything_changed(client):
+    assert client.get("/api/backup/last", base_url=BASE).get_json() == {"at": None, "photos": 0, "changed": False}
+    it = add(client)
+    assert client.get("/api/backup/last", base_url=BASE).get_json()["photos"] == 1
+    assert client.get("/api/backup", base_url=BASE).status_code == 200
+    r = client.get("/api/backup/last", base_url=BASE).get_json()
+    assert r["at"] and not r["changed"]
+    import os
+    import time
+    d = server.DATA / it["id"]
+    os.utime(d / "meta.json", (time.time() + 5, time.time() + 5))   # a change after the backup
+    assert client.get("/api/backup/last", base_url=BASE).get_json()["changed"]
+    assert "backup.json" not in zipfile.ZipFile(io.BytesIO(client.get("/api/backup", base_url=BASE).data)).namelist()
+
+
+def test_print_page_says_how_many_fit_and_wraps_its_pages(client):
+    ids = [add(client, name=f"Kid{i}.jpg")["id"] for i in range(3)]
+    page = client.get("/print?orn=3&copies=5", base_url=BASE).get_data(as_text=True)   # 15 ornaments: more than a page
+    assert '<div id="sheets">' in page and "fit on a page" in page
+    n = int(page.split(" fit on a page")[0].rsplit(" ", 1)[1])
+    assert 2 <= n < 15
+    one = client.get(f"/print?orn=3&ids={ids[0]}", base_url=BASE).get_data(as_text=True)
+    assert "fit on a page" not in one                       # one page: nothing to say
